@@ -41,6 +41,8 @@ target_sources(taiga-gui PRIVATE
 
 	manga/manga_widget.cpp
 	manga/manga_widget.hpp
+	manga/manga_dialog.cpp
+	manga/manga_dialog.hpp
 
 	main/about_dialog.cpp
 	main/about_dialog.hpp

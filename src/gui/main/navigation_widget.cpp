@@ -53,6 +53,11 @@ NavigationWidget::NavigationWidget(QWidget* parent) : QTreeWidget(parent) {
     const auto page = current->data(0, pageIndexRole).value<MainWindowPage>();
     emit currentPageChanged(page);
 
+    if (page == MainWindowPage::Manga) {
+      constexpr auto statusRole = static_cast<int>(NavigationItemDataRole::MangaStatus);
+      emit currentMangaStatusChanged(current->data(0, statusRole).toString());
+      return;
+    }
     if (page != MainWindowPage::List) return;
 
     constexpr auto statusRole = static_cast<int>(NavigationItemDataRole::ListStatus);
@@ -100,7 +105,21 @@ void NavigationWidget::refresh() {
     setItemData(item, NavigationItemDataRole::Counter, statusCounts[status]);
   }
 
-  addItem("Manga List", "list_alt", MainWindowPage::Manga);
+  auto mangaItem = addItem("Manga List", "list_alt", MainWindowPage::Manga);
+  mangaItem->setExpanded(true);
+  setItemData(mangaItem, NavigationItemDataRole::HasChildren, true);
+  static const QList<QPair<QString, QString>> mangaStatuses{
+      {"reading", "Reading"}, {"completed", "Completed"}, {"on_hold", "On hold"},
+      {"dropped", "Dropped"}, {"plan_to_read", "Wishlist"},
+  };
+  for (const auto& [status, label] : mangaStatuses) {
+    auto item = addChildItem(mangaItem, label);
+    setItemData(item, NavigationItemDataRole::PageIndex, static_cast<int>(MainWindowPage::Manga));
+    setItemData(item, NavigationItemDataRole::IsLastChild, status == "plan_to_read");
+    setItemData(item, NavigationItemDataRole::MangaStatus, status);
+    setItemData(item, NavigationItemDataRole::Counter, m_mangaStatusCounts.value(status));
+    if (status == "plan_to_read") item->setToolTip(0, tr("Plan to read on MyAnimeList"));
+  }
 
   auto historyItem = addItem("History", "history", MainWindowPage::History);
   setItemData(historyItem, NavigationItemDataRole::Counter, sync::queue.count());
@@ -110,6 +129,18 @@ void NavigationWidget::refresh() {
   addItem("Torrents", "rss_feed", MainWindowPage::Torrents)->setDisabled(true);  // placeholder
 
   setUpdatesEnabled(true);
+}
+
+void NavigationWidget::updateMangaCounts(const QHash<QString, int>& counts) {
+  m_mangaStatusCounts = counts;
+  const auto mangaItem = findItemByPage(MainWindowPage::Manga);
+  if (!mangaItem) return;
+  for (int index = 0; index < mangaItem->childCount(); ++index) {
+    auto* item = mangaItem->child(index);
+    const auto status = item->data(0, static_cast<int>(NavigationItemDataRole::MangaStatus))
+                            .toString();
+    setItemData(item, NavigationItemDataRole::Counter, counts.value(status));
+  }
 }
 
 void NavigationWidget::mouseMoveEvent(QMouseEvent* event) {

@@ -52,12 +52,15 @@ public:
   void updateListEntry(const int id, const anime::list::Fields dirty);
   void fetchMangaList(int offset = 0, QList<manga::Entry> entries = {});
   void searchManga(const QString& query);
-  void updateMangaEntry(const manga::Entry& entry);
+  void fetchMangaDetails(int id);
+  void updateMangaEntry(const manga::Entry& entry, const manga::Entry& previous);
   void deleteMangaEntry(int id);
 
 signals:
   void mangaListFetched(const QList<manga::Entry>& entries);
   void mangaSearchCompleted(const QString& query, const QList<manga::Entry>& entries);
+  void mangaDetailsFetched(const manga::Entry& entry);
+  void mangaDetailsFailed(int id);
   void mangaEntryUpdated(const manga::Entry& entry);
   void mangaEntryDeleted(int id);
 
