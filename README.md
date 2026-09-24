@@ -9,7 +9,7 @@
 
 ## Manga tracking
 
-Connect a MyAnimeList account in Settings, then open **Manga List** in the sidebar. The page loads your manga list from MyAnimeList and keeps a local copy for quick access on later launches. You can filter your list, add manga from the **Find manga** tab, edit reading status, chapter and volume progress, and score, or remove a title. Select a manga and use **+1 chapter** for a quick progress update. Manga progress changes only when you make an edit; video detection does not affect it.
+In **Settings > Accounts**, select MyAnimeList and click **Authorize...**. Approve Taiga in your browser, then paste the code shown there into the prompt. Open **Manga List** in the sidebar. The page loads your manga list from MyAnimeList and keeps a local copy for quick access on later launches. You can filter your list, add manga from the **Find manga** tab, edit reading status, chapter and volume progress, and score, or remove a title. Select a manga and use **+1 chapter** for a quick progress update. Manga progress changes only when you make an edit; video detection does not affect it.
 
 ## Local Windows build
 
