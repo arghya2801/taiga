@@ -100,6 +100,8 @@ void NavigationWidget::refresh() {
     setItemData(item, NavigationItemDataRole::Counter, statusCounts[status]);
   }
 
+  addItem("Manga List", "list_alt", MainWindowPage::Manga);
+
   auto historyItem = addItem("History", "history", MainWindowPage::History);
   setItemData(historyItem, NavigationItemDataRole::Counter, sync::queue.count());
 

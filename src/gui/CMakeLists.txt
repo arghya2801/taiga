@@ -39,6 +39,9 @@ target_sources(taiga-gui PRIVATE
 	list/list_widget.cpp
 	list/list_widget.hpp
 
+	manga/manga_widget.cpp
+	manga/manga_widget.hpp
+
 	main/about_dialog.cpp
 	main/about_dialog.hpp
 	main/main_window.cpp

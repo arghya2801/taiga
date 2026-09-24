@@ -21,6 +21,7 @@
 #include <QSet>
 #include <functional>
 
+#include "media/manga.hpp"
 #include "sync/service.hpp"
 
 class QRestReply;
@@ -33,6 +34,8 @@ constexpr auto kApiUrl = "https://api.myanimelist.net/v2";
 constexpr auto kTokenUrl = "https://myanimelist.net/v1/oauth2/token";
 
 class Service final : public sync::Service {
+  Q_OBJECT
+
 public:
   Service();
   ~Service() = default;
@@ -47,6 +50,16 @@ public:
   void addListEntry(const int id, const anime::list::Fields dirty);
   void deleteListEntry(const int id);
   void updateListEntry(const int id, const anime::list::Fields dirty);
+  void fetchMangaList(int offset = 0, QList<manga::Entry> entries = {});
+  void searchManga(const QString& query);
+  void updateMangaEntry(const manga::Entry& entry);
+  void deleteMangaEntry(int id);
+
+signals:
+  void mangaListFetched(const QList<manga::Entry>& entries);
+  void mangaSearchCompleted(const QString& query, const QList<manga::Entry>& entries);
+  void mangaEntryUpdated(const manga::Entry& entry);
+  void mangaEntryDeleted(int id);
 
 private:
   void refreshAccessToken(std::function<void()> onSuccess);

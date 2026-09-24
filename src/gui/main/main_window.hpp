@@ -37,6 +37,7 @@ namespace gui {
 class HistoryWidget;
 class LibraryWidget;
 class ListWidget;
+class MangaWidget;
 class NavigationWidget;
 class NowPlayingWidget;
 class SearchWidget;
@@ -93,6 +94,7 @@ private:
   HistoryWidget* m_historyWidget = nullptr;
   LibraryWidget* m_libraryWidget = nullptr;
   ListWidget* m_listWidget = nullptr;
+  MangaWidget* m_mangaWidget = nullptr;
   NavigationController* m_navigationController = nullptr;
   NavigationWidget* m_navigationWidget = nullptr;
   NowPlayingWidget* m_nowPlayingWidget = nullptr;

@@ -35,6 +35,7 @@ enum class MainWindowPage {
   Home,
   Search,
   List,
+  Manga,
   History,
   Library,
   Torrents,

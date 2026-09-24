@@ -29,6 +29,7 @@
 #include "gui/history/history_widget.hpp"
 #include "gui/library/library_widget.hpp"
 #include "gui/list/list_widget.hpp"
+#include "gui/manga/manga_widget.hpp"
 #include "gui/main/about_dialog.hpp"
 #include "gui/main/navigation_controller.hpp"
 #include "gui/main/navigation_widget.hpp"
@@ -209,6 +210,11 @@ void MainWindow::initPage(MainWindowPage page) {
     case MainWindowPage::List:
       m_listWidget = new ListWidget(ui_->listPage);
       init_page(ui_->listPage, m_listWidget);
+      break;
+
+    case MainWindowPage::Manga:
+      m_mangaWidget = new MangaWidget(ui_->mangaPage);
+      init_page(ui_->mangaPage, m_mangaWidget);
       break;
 
     case MainWindowPage::History:

@@ -46,6 +46,7 @@ target_sources(taiga PRIVATE
 	media/anime_utils.cpp
 	media/anime_utils.hpp
 	media/anime.hpp
+	media/manga.hpp
 
 	sync/anilist/anilist.cpp
 	sync/anilist/anilist.hpp
@@ -72,6 +73,7 @@ target_sources(taiga PRIVATE
 	sync/myanimelist/myanimelist.cpp
 	sync/myanimelist/myanimelist.hpp
 	sync/myanimelist/myanimelist_auth.cpp
+	sync/myanimelist/myanimelist_manga.cpp
 	sync/myanimelist/myanimelist_error.cpp
 	sync/myanimelist/myanimelist_error.hpp
 	sync/myanimelist/myanimelist_parsers.cpp
