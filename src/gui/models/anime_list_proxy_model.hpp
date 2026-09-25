@@ -60,6 +60,9 @@ protected:
   bool lessThan(const QModelIndex& lhs, const QModelIndex& rhs) const override;
 
 private:
+  bool columnLessThan(const QModelIndex& lhs, const QModelIndex& rhs) const;
+
+private:
   AnimeListProxyModelFilter m_filter;
 };
 

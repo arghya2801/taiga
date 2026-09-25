@@ -27,6 +27,7 @@
 #include "gui/common/anime_list_view_base.hpp"
 #include "gui/models/anime_list_model.hpp"
 #include "gui/models/anime_list_proxy_model.hpp"
+#include "taiga/options.hpp"
 #include "gui/utils/painters.hpp"
 
 namespace gui {
@@ -62,11 +63,7 @@ void ListViewCards::mousePressEvent(QMouseEvent* event) {
     const QModelIndex index = indexAt(event->pos());
     if (index.isValid()) {
       setCurrentIndex(index);
-      if (m_base->context() == AnimeListContext::Search) {
-        m_base->openAnimePage(index);
-      } else {
-        m_base->playNextEpisode(index);
-      }
+      m_base->runAction(taiga::opt::listMiddleClick.get(), index);
       return;
     }
   }

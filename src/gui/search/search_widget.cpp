@@ -19,10 +19,12 @@
 #include "search_widget.hpp"
 
 #include <QActionGroup>
+#include <QDate>
 #include <QLineEdit>
 #include <QToolBar>
 #include <QToolButton>
 
+#include "base/string.hpp"
 #include "gui/common/anime_list_context.hpp"
 #include "gui/common/anime_list_view.hpp"
 #include "gui/common/anime_list_view_cards.hpp"
@@ -176,7 +178,36 @@ SearchWidget::SearchWidget(QWidget* parent)
     const auto actionSort = new QAction(theme.getIcon("sort"), tr("Sort"), this);
     const auto actionView = new QAction(theme.getIcon("grid_view"), tr("View"), this);
     const auto actionMore = new QAction(theme.getIcon("more_horiz"), tr("More"), this);
+    const auto actionSeason = new QAction(theme.getIcon("lists"), tr("Seasons"), this);
+    m_toolbar->addAction(actionSeason);
     m_toolbar->addAction(actionSort);
+
+    // One click to a season, like v1's season browser.
+    const auto seasonMenu = new QMenu(this);
+    connect(seasonMenu, &QMenu::aboutToShow, this, [this, seasonMenu] {
+      seasonMenu->clear();
+      const auto today = QDate::currentDate();
+      const anime::Season current{FuzzyDate{std::chrono::year{today.year()},
+                                            std::chrono::month{static_cast<unsigned>(today.month())},
+                                            std::chrono::day{static_cast<unsigned>(today.day())}}};
+      auto previous = current;
+      auto next = current;
+      --previous;
+      ++next;
+      const auto add = [this, seasonMenu](const QString& label, const anime::Season& season) {
+        seasonMenu->addAction(u"%1 (%2)"_s.arg(label, formatSeason(season)), this, [this, season] {
+          m_comboYear->setCurrentIndex(
+              m_comboYear->findData(static_cast<int>(season.year)));
+          m_comboSeason->setCurrentIndex(m_comboSeason->findData(static_cast<int>(season.name)));
+        });
+      };
+      add(tr("Previous season"), previous);
+      add(tr("Current season"), current);
+      add(tr("Next season"), next);
+    });
+    const auto seasonButton = static_cast<QToolButton*>(m_toolbar->widgetForAction(actionSeason));
+    seasonButton->setPopupMode(QToolButton::InstantPopup);
+    seasonButton->setMenu(seasonMenu);
     m_toolbar->addAction(actionView);
     m_toolbar->addAction(actionMore);
 

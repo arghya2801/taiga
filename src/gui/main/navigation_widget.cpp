@@ -27,6 +27,7 @@
 #include "media/anime.hpp"
 #include "media/anime_db.hpp"
 #include "media/anime_list.hpp"
+#include "media/manga.hpp"
 #include "sync/anilist/anilist.hpp"
 #include "sync/kitsu/kitsu.hpp"
 #include "sync/myanimelist/myanimelist.hpp"
@@ -53,6 +54,11 @@ NavigationWidget::NavigationWidget(QWidget* parent) : QTreeWidget(parent) {
     const auto page = current->data(0, pageIndexRole).value<MainWindowPage>();
     emit currentPageChanged(page);
 
+    if (page == MainWindowPage::Manga) {
+      constexpr auto statusRole = static_cast<int>(NavigationItemDataRole::MangaStatus);
+      emit currentMangaStatusChanged(current->data(0, statusRole).toString());
+      return;
+    }
     if (page != MainWindowPage::List) return;
 
     constexpr auto statusRole = static_cast<int>(NavigationItemDataRole::ListStatus);
@@ -100,14 +106,39 @@ void NavigationWidget::refresh() {
     setItemData(item, NavigationItemDataRole::Counter, statusCounts[status]);
   }
 
+  auto mangaItem = addItem("Manga List", "list_alt", MainWindowPage::Manga);
+  mangaItem->setExpanded(true);
+  setItemData(mangaItem, NavigationItemDataRole::HasChildren, true);
+  for (const auto& [value, label] : manga::kStatuses) {
+    const auto status = QString::fromLatin1(value);
+    auto item = addChildItem(mangaItem, QString::fromLatin1(label));
+    setItemData(item, NavigationItemDataRole::PageIndex, static_cast<int>(MainWindowPage::Manga));
+    setItemData(item, NavigationItemDataRole::IsLastChild, status == "plan_to_read");
+    setItemData(item, NavigationItemDataRole::MangaStatus, status);
+    setItemData(item, NavigationItemDataRole::Counter, m_mangaStatusCounts.value(status));
+  }
+
   auto historyItem = addItem("History", "history", MainWindowPage::History);
   setItemData(historyItem, NavigationItemDataRole::Counter, sync::queue.count());
 
   addSeparator();
   addItem("Library", "folder", MainWindowPage::Library);
-  addItem("Torrents", "rss_feed", MainWindowPage::Torrents)->setDisabled(true);  // placeholder
+  addItem("Statistics", "bar_chart", MainWindowPage::Stats);
+  addItem("Torrents", "rss_feed", MainWindowPage::Torrents);
 
   setUpdatesEnabled(true);
+}
+
+void NavigationWidget::updateMangaCounts(const QHash<QString, int>& counts) {
+  m_mangaStatusCounts = counts;
+  const auto mangaItem = findItemByPage(MainWindowPage::Manga);
+  if (!mangaItem) return;
+  for (int index = 0; index < mangaItem->childCount(); ++index) {
+    auto* item = mangaItem->child(index);
+    const auto status = item->data(0, static_cast<int>(NavigationItemDataRole::MangaStatus))
+                            .toString();
+    setItemData(item, NavigationItemDataRole::Counter, counts.value(status));
+  }
 }
 
 void NavigationWidget::mouseMoveEvent(QMouseEvent* event) {

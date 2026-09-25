@@ -35,10 +35,12 @@ enum class MainWindowPage {
   Home,
   Search,
   List,
+  Manga,
   History,
   Library,
   Torrents,
   Profile,
+  Stats,  // not in the .ui file; `MainWindow` adds its page
 };
 
 class NavigationController final : public QObject {

@@ -20,7 +20,7 @@
 
 #include <QGuiApplication>
 #include <QPainter>
-#include <QProxyStyle>
+#include <QPainterPath>
 
 #include "base/string.hpp"
 #include "gui/models/anime_list_model.hpp"
@@ -29,6 +29,8 @@
 #include "media/anime.hpp"
 #include "media/anime_list.hpp"
 #include "media/anime_list_utils.hpp"
+#include "media/anime_utils.hpp"
+#include "track/scanner.hpp"
 
 namespace gui {
 
@@ -47,31 +49,69 @@ void paintEmptyListText(QAbstractScrollArea* area, const QString& text) {
 void paintProgressBar(QPainter* painter, const QStyleOption& option, const Anime* anime,
                       const ListEntry* entry) {
   if (!anime || !entry) return;
+  const int total = anime->episode_count;
+  // Like v1: aired but unwatched episodes are a faint extension of the bar, and episodes in the
+  // library folders are ticks along the bottom. Both need a known total to place them.
+  const int aired = total <= 0 ? 0
+                    : anime::airingStatus(*anime) == anime::Status::FinishedAiring
+                        ? total
+                        : std::min(anime::estimateLastAiredEpisodeNumber(*anime), total);
+  paintProgressBar(painter, option, entry->watched_episodes, total, aired, anime->id);
+}
 
-  const int episodes = anime->episode_count;
-  const int watched = std::clamp(entry->watched_episodes, 0,
-                                 episodes > 0 ? episodes : std::numeric_limits<int>::max());
-  const auto text = u"%1/%2"_s.arg(watched).arg(formatNumber(episodes, "?"));
+void paintProgressBar(QPainter* painter, const QStyleOption& option, int done, int total,
+                      int aired, int animeId) {
+  done = std::clamp(done, 0, total > 0 ? total : std::numeric_limits<int>::max());
+  const auto text = u"%1/%2"_s.arg(done).arg(formatNumber(total, "?"));
+  // Same ratio as `anime::list::getProgressRatio`: unknown totals show a mostly-full bar.
+  const auto ratio = total > 0 ? std::min(done / static_cast<double>(total), 1.0) : 0.8;
 
-  QStyleOptionProgressBar styleOption{};
-  styleOption.state = option.state | QStyle::State_Horizontal;
-  styleOption.direction = option.direction;
-  styleOption.rect = option.rect;
-  styleOption.palette = option.palette;
-  styleOption.palette.setCurrentColorGroup(QPalette::ColorGroup::Active);
-  styleOption.palette.setColor(QPalette::ColorRole::Highlight, theme.isDark()
-                                                                   ? QColor{12, 164, 12, 128}
-                                                                   : QColor{12, 164, 12, 255});
-  styleOption.fontMetrics = option.fontMetrics;
-  styleOption.maximum = 100;
-  styleOption.minimum = 0;
-  styleOption.progress = static_cast<int>(anime::list::getProgressRatio(anime, entry) * 100);
-  styleOption.text = text;
-  styleOption.textAlignment = Qt::AlignCenter;
-  styleOption.textVisible = true;
+  // Flat: a quiet track, one solid fill, no gradients or bevels.
+  const QRectF bar = QRectF(option.rect).adjusted(0, 1, 0, -1);
+  const QRectF fill{bar.left(), bar.top(), bar.width() * ratio, bar.height()};
+  constexpr qreal radius = 3;
 
-  static const auto proxyStyle{new QProxyStyle{"fusion"}};
-  proxyStyle->drawControl(QStyle::CE_ProgressBar, &styleOption, painter);
+  painter->save();
+  painter->setRenderHint(QPainter::Antialiasing);
+  painter->setPen(Qt::NoPen);
+
+  QPainterPath track;
+  track.addRoundedRect(bar, radius, radius);
+  painter->setClipPath(track);
+  painter->fillRect(bar, theme.color(Theme::Color::Sunken));
+
+  const auto progress = theme.color(Theme::Color::Progress);
+  if (total > 0) {
+    const qreal step = bar.width() / total;
+    if (aired > done) {
+      auto color = progress;
+      color.setAlpha(theme.isDark() ? 26 : 34);
+      painter->fillRect(QRectF{fill.right(), bar.top(), (aired - done) * step, bar.height()},
+                        color);
+    }
+    painter->fillRect(fill, progress);
+    if (animeId && track::availableEpisodes.last(animeId) > done) {
+      const auto color = theme.color(Theme::Color::Available);
+      for (int number = done + 1; number <= total; ++number) {
+        if (!track::availableEpisodes.contains(animeId, number)) continue;
+        painter->fillRect(QRectF{bar.left() + (number - 1) * step, bar.bottom() - 3,
+                                 std::max(step - 1, 1.5), 3},
+                          color);
+      }
+    }
+  } else {
+    painter->fillRect(fill, progress);
+  }
+
+  // The text changes color where the fill passes under it, so it reads on both.
+  painter->setClipRect(QRectF{fill.right(), bar.top(), bar.right() - fill.right(), bar.height()});
+  painter->setPen(theme.color(Theme::Color::Text));
+  painter->drawText(bar, Qt::AlignCenter, text);
+  painter->setClipRect(fill);
+  painter->setPen(Qt::white);
+  painter->drawText(bar, Qt::AlignCenter, text);
+
+  painter->restore();
 }
 
 void paintSpinner(QPainter* painter, const QPixmap& pixmap, const QPointF& center, qreal angle) {

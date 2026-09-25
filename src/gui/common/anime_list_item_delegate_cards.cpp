@@ -29,6 +29,7 @@
 #include "gui/utils/painter_state_saver.hpp"
 #include "gui/utils/painters.hpp"
 #include "gui/utils/theme.hpp"
+#include "media/anime_db.hpp"
 #include "media/anime_season.hpp"
 
 namespace gui {
@@ -41,6 +42,8 @@ ListItemDelegateCards::ListItemDelegateCards(QObject* parent) : QStyledItemDeleg
   m_spinnerPixmap = theme.getIcon("progress_activity").pixmap(QSize(kSpinnerSize, kSpinnerSize));
 
   connect(&m_timerSpinner, &QTimer::timeout, this, &ListItemDelegateCards::advanceSpinner);
+  connect(&anime::db, &anime::Database::itemUpdated, this,
+          [this](int id) { m_synopses.remove(id); });
 }
 
 void ListItemDelegateCards::paint(QPainter* painter, const QStyleOptionViewItem& option,
@@ -58,16 +61,15 @@ void ListItemDelegateCards::paint(QPainter* painter, const QStyleOptionViewItem&
   QRect rect = opt.rect;
 
   QPainterPath path;
-  path.addRoundedRect(rect, 4, 4);
+  path.addRoundedRect(QRectF(rect).adjusted(0.5, 0.5, -0.5, -0.5), 6, 6);
   painter->setClipPath(path);
 
-  // Background
+  // Background: one flat surface. Selection and hover tint it, like list rows.
+  painter->fillRect(rect, theme.color(Theme::Color::Raised));
   if (option.state & QStyle::State_Selected) {
-    painter->fillRect(rect, opt.palette.highlight());
-  } else if (theme.isDark()) {
-    painter->fillRect(rect, opt.palette.mid());
-  } else {
-    painter->fillRect(rect, opt.palette.alternateBase());
+    painter->fillRect(rect, theme.isDark() ? QColor{255, 255, 255, 18} : QColor{0, 0, 0, 14});
+  } else if (option.state & QStyle::State_MouseOver) {
+    painter->fillRect(rect, theme.isDark() ? QColor{255, 255, 255, 6} : QColor{0, 0, 0, 6});
   }
 
   // Poster
@@ -75,11 +77,7 @@ void ListItemDelegateCards::paint(QPainter* painter, const QStyleOptionViewItem&
     QRect posterRect = rect;
     posterRect.setWidth(posterWidth);
 
-    if (theme.isDark()) {
-      painter->fillRect(posterRect, opt.palette.dark());
-    } else {
-      painter->fillRect(posterRect, opt.palette.mid());
-    }
+    painter->fillRect(posterRect, theme.color(Theme::Color::Sunken));
 
     const auto pixmap =
         index.data(static_cast<int>(AnimeListItemDataRole::Poster)).value<QPixmap>();
@@ -101,6 +99,7 @@ void ListItemDelegateCards::paint(QPainter* painter, const QStyleOptionViewItem&
         sourceRect.adjust(0, half * scale, 0, -half * scale);
       }
 
+      painter->setRenderHint(QPainter::SmoothPixmapTransform);
       painter->drawPixmap(posterRect, pixmap, sourceRect);
     } else if (!item->image_url.empty()) {
       m_loadingIndices.insert(index);
@@ -118,8 +117,8 @@ void ListItemDelegateCards::paint(QPainter* painter, const QStyleOptionViewItem&
     auto progressOptions = opt;
     progressOptions.rect = rect;
     progressOptions.rect.setWidth(posterWidth);
-    progressOptions.rect.setTop(progressOptions.rect.bottom() - 28);
-    progressOptions.rect.adjust(4, 4, -4, -4);
+    progressOptions.rect.setTop(progressOptions.rect.bottom() - 26);
+    progressOptions.rect.adjust(6, 4, -6, -6);
     paintProgressBar(painter, progressOptions, item, entry);
   }
 
@@ -128,11 +127,10 @@ void ListItemDelegateCards::paint(QPainter* painter, const QStyleOptionViewItem&
   // Title
   {
     QRect titleRect = rect;
-    titleRect.setHeight(32);
+    titleRect.setHeight(36);
+    titleRect.adjust(14, 4, -14, 0);
 
-    painter->fillRect(titleRect, opt.palette.dark());
-    titleRect.adjust(12, 0, -12, 0);
-
+    painter->setPen(theme.color(Theme::Color::Text));
     auto titleFont = font;
     titleFont.setPointSize(10);
     titleFont.setWeight(QFont::Weight::DemiBold);
@@ -144,7 +142,7 @@ void ListItemDelegateCards::paint(QPainter* painter, const QStyleOptionViewItem&
 
     painter->drawText(titleRect, Qt::AlignVCenter | Qt::TextSingleLine, elidedTitle);
 
-    rect.adjust(12, 32 + 8, -12, -12);
+    rect.adjust(14, 36 + 2, -14, -12);
   }
 
   // Summary
@@ -159,9 +157,8 @@ void ListItemDelegateCards::paint(QPainter* painter, const QStyleOptionViewItem&
     }
     const QString summary = parts.join(" · ");
 
-    auto summaryFont = font;
-    summaryFont.setWeight(QFont::Weight::DemiBold);
-    painter->setFont(summaryFont);
+    painter->setFont(font);
+    painter->setPen(theme.color(Theme::Color::Muted));
 
     const QFontMetrics metrics(painter->font());
     QRect summaryRect = rect;
@@ -182,6 +179,7 @@ void ListItemDelegateCards::paint(QPainter* painter, const QStyleOptionViewItem&
     };
 
     painter->setFont(font);
+    painter->setPen(theme.color(Theme::Color::Muted));
 
     const QFontMetrics metrics(painter->font());
     QRect linesRect = rect;
@@ -197,12 +195,16 @@ void ListItemDelegateCards::paint(QPainter* painter, const QStyleOptionViewItem&
 
   // Synopsis
   {
-    QString synopsis = QString::fromStdString(item->synopsis);
-    synopsis.replace("<br>", "\n");
-    removeHtmlTags(synopsis);
-    synopsis = synopsis.simplified();
+    auto it = m_synopses.find(item->id);
+    if (it == m_synopses.end()) {
+      QString synopsis = QString::fromStdString(item->synopsis);
+      synopsis.replace("<br>", "\n");
+      removeHtmlTags(synopsis);
+      it = m_synopses.insert(item->id, synopsis.simplified());
+    }
+    const QString& synopsis = *it;
 
-    painter->setPen(opt.palette.placeholderText().color());
+    painter->setPen(theme.color(Theme::Color::Faint));
 
     auto synopsisFont = painter->font();
     synopsisFont.setPointSize(8);
@@ -214,6 +216,13 @@ void ListItemDelegateCards::paint(QPainter* painter, const QStyleOptionViewItem&
 
     painter->drawText(synopsisRect, Qt::TextWordWrap, synopsis);
   }
+
+  // Hairline edge, so cards read as cards without shadows.
+  painter->setClipping(false);
+  painter->setRenderHint(QPainter::Antialiasing);
+  painter->setPen(theme.color(Theme::Color::Line));
+  painter->setBrush(Qt::NoBrush);
+  painter->drawPath(path);
 }
 
 QSize ListItemDelegateCards::sizeHint(const QStyleOptionViewItem& option,

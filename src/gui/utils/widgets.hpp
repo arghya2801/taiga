@@ -21,7 +21,13 @@
 #include <QString>
 #include <QWidget>
 
+class QHeaderView;
+
 namespace gui {
+
+// Right-click menu to show/hide columns, plus saving the layout under `sessionKey`.
+// Call after the view has set up its default sections.
+void setupHeaderMenu(QHeaderView* header, const QString& sessionKey);
 
 void centerWidgetToScreen(QWidget* widget);
 

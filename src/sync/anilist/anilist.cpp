@@ -123,11 +123,13 @@ void Service::search(const SearchParams& params, const int page) {
     }
 
     QList<int> ids;
+    QList<Anime> parsed;
     for (const auto& item : *items) {
       if (!item) continue;
-      anime::db.updateItem(*item);
+      parsed.append(*item);
       ids.append(item->id);
     }
+    anime::db.updateItems(parsed);
 
     emit searchCompleted(params, ids);
 

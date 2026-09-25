@@ -38,6 +38,7 @@
 #include "media/anime_list.hpp"
 #include "media/anime_utils.hpp"
 #include "sync/service.hpp"
+#include "taiga/options.hpp"
 #include "track/play.hpp"
 
 namespace gui {
@@ -53,7 +54,9 @@ ListViewBase::ListViewBase(QWidget* parent, QAbstractItemView* view, AnimeListMo
 
   connect(mainWindow()->searchBox(), &QLineEdit::textChanged, this, &ListViewBase::filterByText);
 
-  connect(m_view, &QAbstractItemView::doubleClicked, this, &ListViewBase::showMediaDialog);
+  connect(m_view, &QAbstractItemView::doubleClicked, this, [this](const QModelIndex& index) {
+    runAction(taiga::opt::listDoubleClick.get(), index);
+  });
 
   connect(m_view, &QWidget::customContextMenuRequested, this, &ListViewBase::showMediaMenu);
 
@@ -94,6 +97,32 @@ void ListViewBase::playNextEpisode(const QModelIndex& index) {
       .text = tr("Could not find episode #%1 (%2).").arg(*number).arg(anime::preferredTitle(*item)),
       .spin = false,
   });
+}
+
+void ListViewBase::runAction(int action, const QModelIndex& index) {
+  using taiga::opt::ListAction;
+  const auto anime = m_model->getAnime(m_proxyModel->mapToSource(index));
+  if (!anime) return;
+
+  switch (static_cast<ListAction>(action)) {
+    case ListAction::ViewDetails:
+      MediaDialog::show(mainWindow(), MediaDialogPage::Details, *anime);
+      break;
+    case ListAction::EditEntry:
+      MediaDialog::show(mainWindow(), MediaDialogPage::List, *anime);
+      break;
+    case ListAction::PlayNextEpisode:
+      playNextEpisode(index);
+      break;
+    case ListAction::OpenFolder:
+      openAnimeFolder(*anime);
+      break;
+    case ListAction::OpenPage:
+      openAnimePage(index);
+      break;
+    case ListAction::Nothing:
+      break;
+  }
 }
 
 void ListViewBase::showMediaDialog(const QModelIndex& index) {

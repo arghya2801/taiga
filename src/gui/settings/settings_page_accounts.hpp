@@ -17,6 +17,8 @@
  */
 #pragma once
 
+#include <QString>
+
 #include "gui/settings/settings_page.hpp"
 
 namespace gui {
@@ -34,6 +36,10 @@ public:
 
 private:
   void updateVisibleGroup();
+  void authorizeMyAnimeList();
+
+  bool authorizingMyAnimeList_ = false;
+  QString myanimelistAuthError_;
 };
 
 }  // namespace gui

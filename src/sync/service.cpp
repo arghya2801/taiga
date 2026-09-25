@@ -52,7 +52,7 @@ void Service::logError(const QString& message) {
 }
 
 void Service::onAuthenticationCompleted(bool authenticated) {
-  switch (currentServiceId()) {
+  switch (id_) {
     case ServiceId::MyAnimeList:
       taiga::accounts.setMyanimelistAuthenticated(authenticated);
       break;
@@ -64,7 +64,7 @@ void Service::onAuthenticationCompleted(bool authenticated) {
       break;
   }
 
-  if (authenticated) {
+  if (authenticated && id_ == currentServiceId()) {
     synchronize();
   }
 }

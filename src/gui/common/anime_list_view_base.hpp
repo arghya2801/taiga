@@ -51,6 +51,7 @@ public slots:
   void filterByText(const QString& text);
   void openAnimePage(const QModelIndex& index);
   void playNextEpisode(const QModelIndex& index);
+  void runAction(int action, const QModelIndex& index);
   void showMediaDialog(const QModelIndex& index);
   void showMediaMenu();
   void updateSelectionStatus(const QItemSelection& selected, const QItemSelection& deselected);

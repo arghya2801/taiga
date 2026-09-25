@@ -27,6 +27,7 @@
 #include "media/anime_list_utils.hpp"
 #include "media/anime_season.hpp"
 #include "media/anime_utils.hpp"
+#include "taiga/options.hpp"
 
 namespace {
 
@@ -166,16 +167,53 @@ bool AnimeListProxyModel::lessThan(const QModelIndex& lhs, const QModelIndex& rh
   const auto rhs_anime = getAnime(rhs);
   if (!lhs_anime || !rhs_anime) return false;
 
+  const auto compareTitles = [&] {
+    return compareStrings(anime::preferredTitle(*lhs_anime), anime::preferredTitle(*rhs_anime),
+                          Qt::CaseInsensitive);
+  };
+
+  // Qt flips the result for descending sorts, so flip this too to keep new episodes on top.
+  if (taiga::opt::newEpisodesOnTop.get()) {
+    const bool lhs_new = hasNewEpisode(*lhs_anime, getListEntry(lhs));
+    const bool rhs_new = hasNewEpisode(*rhs_anime, getListEntry(rhs));
+    if (lhs_new != rhs_new) return (sortOrder() == Qt::AscendingOrder) == lhs_new;
+  }
+
+  if (lhs.column() == AnimeListModel::COLUMN_TITLE) return compareTitles() < 0;
+
+  if (columnLessThan(lhs, rhs)) return true;
+  if (columnLessThan(rhs, lhs)) return false;
+
+  // Equal values fall back to the title, like v1's secondary sort. The title order is flipped
+  // for descending sorts so it always reads A-Z.
+  const int titles = compareTitles();
+  return sortOrder() == Qt::AscendingOrder ? titles < 0 : titles > 0;
+}
+
+bool AnimeListProxyModel::columnLessThan(const QModelIndex& lhs, const QModelIndex& rhs) const {
+  const auto lhs_anime = getAnime(lhs);
+  const auto rhs_anime = getAnime(rhs);
+
   const auto lhs_entry = getListEntry(lhs);
   const auto rhs_entry = getListEntry(rhs);
 
   switch (lhs.column()) {
-    case AnimeListModel::COLUMN_TITLE:
-      return compareStrings(anime::preferredTitle(*lhs_anime), anime::preferredTitle(*rhs_anime),
-                            Qt::CaseInsensitive) < 0;
 
     case AnimeListModel::COLUMN_DURATION:
       return lhs_anime->episode_length < rhs_anime->episode_length;
+
+    case AnimeListModel::COLUMN_AIRING: {
+      // Airing first, then upcoming, then finished, like v1.
+      const auto rank = [](const Anime* anime) {
+        switch (anime::airingStatus(*anime)) {
+          case anime::Status::Airing: return 0;
+          case anime::Status::NotYetAired: return 1;
+          case anime::Status::FinishedAiring: return 2;
+          default: return 3;
+        }
+      };
+      return rank(lhs_anime) < rank(rhs_anime);
+    }
 
     case AnimeListModel::COLUMN_AVERAGE:
       return lhs_anime->score < rhs_anime->score;

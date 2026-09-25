@@ -1,73 +1,173 @@
+/*
+Light theme. Values match `Theme::color()`:
+  surface #ffffff, raised #f4f5f7, sunken #eaecef, line #e1e3e7,
+  text #1c1f24, muted #5c636e, faint #969ca6
+*/
+
 /* Toolbar */
 
 QMainWindow > QToolBar {
-  border-bottom-color: rgba(0, 0, 0, 16%);
+  border-bottom-color: #e1e3e7;
+}
+
+QMainWindow > QToolBar QLineEdit {
+  background-color: #ffffff;
+  border: 1px solid #d6d9de;
+  border-radius: 6px;
+  color: #1c1f24;
+}
+QMainWindow > QToolBar QLineEdit:focus {
+  border-color: palette(highlight);
 }
 
 QMainWindow > #centralWidget > QSplitter {
   background-color: rgba(255, 255, 255, 30%);
 }
 QMainWindow > #centralWidget > QSplitter::handle {
-  background-color: rgba(0, 0, 0, 16%);
+  background-color: #e1e3e7;
 }
 
 /* Navigation */
 
-QTreeWidget#navigation::item:hover:!selected {
+QTreeWidget#navigation {
+  color: #5c636e;
+}
+QTreeWidget#navigation::item:hover {
   background-color: rgba(0, 0, 0, 4%);
+  color: #1c1f24;
 }
-QTreeWidget#navigation::item:active {
-  color: #000;
-}
-QTreeWidget#navigation::item:selected:active {
-  background-color: rgba(0, 0, 0, 8%);
-}
-QTreeWidget#navigation::item:selected:!active {
-  background-color: rgba(0, 0, 0, 6%);
+QTreeWidget#navigation::item:selected {
+  background-color: rgba(0, 0, 0, 7%);
+  color: #1c1f24;
 }
 
-/* List */
+/* Lists */
 
 QMainWindow QStackedWidget QListView,
 QMainWindow QStackedWidget QTreeView {
-  border-top-color: rgba(0, 0, 0, 16%);
+  border-top-color: #e1e3e7;
 }
 
 QMainWindow QStackedWidget QAbstractScrollArea {
-  background-color: #fff;
+  background-color: #ffffff;
 }
 
-QTreeView#animeList QHeaderView {
-  border-bottom-color: rgba(0, 0, 0, 16%);
+QTreeView#animeList,
+QTreeView#historyView,
+QTreeView#libraryView {
+  background-color: #ffffff;
+  alternate-background-color: #fafbfc;
+  color: #1c1f24;
+}
+QTreeView#animeList::item:hover,
+QTreeView#historyView::item:hover,
+QTreeView#libraryView::item:hover {
+  background-color: rgba(0, 0, 0, 3%);
+}
+QTreeView#animeList::item:selected,
+QTreeView#historyView::item:selected,
+QTreeView#libraryView::item:selected {
+  background-color: rgba(0, 0, 0, 7%);
+  color: #1c1f24;
+}
+QTreeView#animeList::item:selected:!active,
+QTreeView#historyView::item:selected:!active,
+QTreeView#libraryView::item:selected:!active {
+  background-color: rgba(0, 0, 0, 5%);
 }
 
-QTreeView#animeList::item {
-  background-color: #fff;
+QHeaderView {
+  background-color: #ffffff;
 }
-QTreeView#animeList::item:alternate {
-  background-color: rgba(0, 0, 0, 1%);
+QHeaderView::section {
+  background-color: #ffffff;
+  color: #5c636e;
+  border: none;
+  border-bottom: 1px solid #e1e3e7;
+  border-right: 1px solid #f0f1f3;
 }
-QTreeView#animeList::item:hover:!selected {
-  background-color: rgba(0, 0, 0, 4%);
+QHeaderView::section:hover {
+  color: #1c1f24;
 }
-QTreeView#animeList::item:active {
-  color: #000;
+
+/* Scrollbars: thin, no arrows */
+
+QScrollBar:vertical,
+QScrollBar:horizontal {
+  background: transparent;
+  border: none;
 }
-QTreeView#animeList::item:selected:active {
-  background-color: rgba(0, 0, 0, 8%);
+QScrollBar:vertical {
+  width: 10px;
 }
-QTreeView#animeList::item:selected:!active {
+QScrollBar:horizontal {
+  height: 10px;
+}
+QScrollBar::handle:vertical,
+QScrollBar::handle:horizontal {
+  background: rgba(0, 0, 0, 16%);
+  border-radius: 3px;
+  margin: 2px;
+}
+QScrollBar::handle:vertical {
+  min-height: 32px;
+}
+QScrollBar::handle:horizontal {
+  min-width: 32px;
+}
+QScrollBar::handle:hover {
+  background: rgba(0, 0, 0, 28%);
+}
+QScrollBar::add-line,
+QScrollBar::sub-line {
+  width: 0;
+  height: 0;
+}
+QScrollBar::add-page,
+QScrollBar::sub-page {
+  background: none;
+}
+
+/* Menus and tooltips */
+
+QMenu {
+  background-color: #ffffff;
+  border: 1px solid #e1e3e7;
+  padding: 4px;
+}
+QMenu::item {
+  padding: 5px 24px 5px 28px;
+  border-radius: 4px;
+  color: #1c1f24;
+}
+QMenu::item:selected {
   background-color: rgba(0, 0, 0, 6%);
+}
+QMenu::item:disabled {
+  color: #969ca6;
+}
+QMenu::separator {
+  height: 1px;
+  background-color: #e1e3e7;
+  margin: 4px 8px;
+}
+
+QToolTip {
+  background-color: #ffffff;
+  color: #1c1f24;
+  border: 1px solid #e1e3e7;
+  padding: 4px 6px;
 }
 
 /* Now Playing */
 
 #nowPlaying {
-  border-top-color: rgba(0, 0, 0, 16%);
+  border-top-color: #e1e3e7;
 }
 
 /* Statusbar */
 
 QStatusBar {
-  border-top-color: rgba(0, 0, 0, 16%);
+  border-top-color: #e1e3e7;
+  color: #5c636e;
 }

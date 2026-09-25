@@ -25,7 +25,10 @@
 #include "gui/common/anime_list_view_base.hpp"
 #include "gui/models/anime_list_model.hpp"
 #include "gui/models/anime_list_proxy_model.hpp"
+#include "taiga/options.hpp"
+#include "base/string.hpp"
 #include "gui/utils/painters.hpp"
+#include "gui/utils/widgets.hpp"
 #include "track/play.hpp"
 
 namespace gui {
@@ -67,6 +70,12 @@ ListView::ListView(QWidget* parent, AnimeListModel* model, AnimeListProxyModel* 
   header()->resizeSection(AnimeListModel::COLUMN_AVERAGE, 75);
   header()->resizeSection(AnimeListModel::COLUMN_TYPE, 75);
   header()->resizeSection(AnimeListModel::COLUMN_LAST_UPDATED, 110);
+  // Airing status sits left of the title, as in v1.
+  header()->moveSection(header()->visualIndex(AnimeListModel::COLUMN_AIRING), 0);
+  header()->resizeSection(AnimeListModel::COLUMN_AIRING, 24);
+  // ".v2": layouts saved before the airing status column existed would misplace it.
+  setupHeaderMenu(header(),
+                  context == AnimeListContext::Search ? u"searchList.v2"_s : u"animeList.v2"_s);
 
   // `sortByColumn` needs to be called before `setSortingEnabled`.
   // Otherwise the sort column is set to `0`.
@@ -94,11 +103,7 @@ void ListView::mousePressEvent(QMouseEvent* event) {
     const QModelIndex index = indexAt(event->pos());
     if (index.isValid()) {
       setCurrentIndex(index);
-      if (m_base->context() == AnimeListContext::Search) {
-        m_base->openAnimePage(index);
-      } else {
-        m_base->playNextEpisode(index);
-      }
+      m_base->runAction(taiga::opt::listMiddleClick.get(), index);
       return;
     }
   }

@@ -37,6 +37,7 @@
 #include "sync/queue.hpp"
 #include "taiga/config.h"
 #include "taiga/path.hpp"
+#include "taiga/options.hpp"
 #include "taiga/settings.hpp"
 #include "taiga/version.hpp"
 #include "track/media.hpp"
@@ -99,6 +100,14 @@ int Application::run() {
 
   window_ = new gui::MainWindow();
   window_->init();
+
+  if (taiga::opt::startMinimized.get()) {
+    // With a tray option on, the tray icon is the only thing shown.
+    if (!taiga::opt::minimizeToTray.get() && !taiga::opt::closeToTray.get()) {
+      window_->showMinimized();
+    }
+    return QApplication::exec();
+  }
 
 #ifdef Q_OS_WINDOWS
   // Delay showing the window to avoid a white flash.
