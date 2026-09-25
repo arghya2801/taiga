@@ -20,11 +20,10 @@
 
 #include <QDateTime>
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
-#include <QFutureWatcher>
 #include <QImage>
-#include <QImageReader>
 #include <QNetworkRequest>
 #include <QPixmapCache>
 #include <QRestReply>
@@ -44,8 +43,25 @@ namespace {
 
 constexpr int kPixmapCacheLimitKb = 200 * 1024;  // 200MB
 
-QString cacheKey(const int id) {
-  return u"poster/%1"_s.arg(id);
+// Posters are never drawn wider than this, so storing more only costs disk and decode time.
+// ponytail: JPEG because it's built into Qt; switch to WebP if qtimageformats gets bundled.
+constexpr int kMaxWidth = 400;
+constexpr int kJpegQuality = 85;
+
+QImage shrink(QImage image) {
+  if (image.width() > kMaxWidth) {
+    image = image.scaledToWidth(kMaxWidth, Qt::SmoothTransformation);
+  }
+  return image.convertToFormat(QImage::Format_RGB32);
+}
+
+bool saveImage(const QImage& image, const QString& path) {
+  QDir().mkpath(QFileInfo(path).path());
+  return image.save(path, "JPG", kJpegQuality);
+}
+
+QString cacheRoot() {
+  return u"%1/cache"_s.arg(QString::fromStdString(taiga::get_data_path()));
 }
 
 }  // namespace
@@ -58,22 +74,102 @@ void ImageProvider::init() {
   m_manager = new QRestAccessManager(taiga::network(), this);
 }
 
-void ImageProvider::fetchPoster(const int id, const bool revalidate) {
+void ImageProvider::fetchPoster(const int id) {
+  if (const auto item = anime::db.item(id); item && !item->image_url.empty()) {
+    fetch(Kind::Anime, id, QString::fromStdString(item->image_url), false);
+  }
+}
+
+QPixmap ImageProvider::loadPoster(const int id) {
   const auto item = anime::db.item(id);
+  if (!item) return {};
+  return load(Kind::Anime, id, QString::fromStdString(item->image_url));
+}
 
-  if (!item || item->image_url.empty()) return;
+QPixmap ImageProvider::loadCover(const int mangaId, const QString& url) {
+  return load(Kind::Manga, mangaId, url);
+}
 
-  QNetworkRequest request{QString::fromStdString(item->image_url)};
+qint64 ImageProvider::cacheSize() const {
+  qint64 size = 0;
+  for (QDirIterator it{cacheRoot(), QDir::Files, QDirIterator::Subdirectories}; it.hasNext();) {
+    size += it.nextFileInfo().size();
+  }
+  return size;
+}
 
-  if (revalidate) {
-    if (const QFileInfo file{fileName(id)}; file.exists()) {
-      request.setHeader(QNetworkRequest::IfModifiedSinceHeader, file.lastModified());
-    }
+void ImageProvider::clearCache() {
+  QDir{cacheRoot()}.removeRecursively();
+  QPixmapCache::clear();
+  m_retryAfter.clear();
+}
+
+QPixmap ImageProvider::load(const Kind kind, const int id, const QString& url) {
+  const auto key = cacheKey(kind, id);
+
+  if (QPixmap pixmap; QPixmapCache::find(key, &pixmap)) return pixmap;
+  if (url.isEmpty() || m_loading.contains(key) || !canRetry(key)) return {};
+
+  const auto path = fileName(kind, id);
+
+  // Nothing on disk: go straight to the network instead of failing a read first.
+  if (!QFile::exists(path)) {
+    fetch(kind, id, url, false);
+    return {};
   }
 
-  m_manager->get(request, this, [this, id](QRestReply& reply) {
+  m_loading.insert(key);
+
+  QtConcurrent::run([path] {
+    QImage image{path};
+    // Files cached before downscaling was added get shrunk the first time they're read.
+    if (image.width() > kMaxWidth) {
+      image = shrink(image);
+      saveImage(image, path);
+    }
+    return image;
+  }).then(this, [this, kind, id, key, url](const QImage& image) {
+    m_loading.remove(key);
+    if (image.isNull()) {
+      QFile::remove(fileName(kind, id));
+      fetch(kind, id, url, false);
+      return;
+    }
+    QPixmapCache::insert(key, QPixmap::fromImage(image));
+    if (kind == Kind::Anime && isStale(id)) fetch(kind, id, url, true);
+    emitChanged(kind, id);
+  });
+
+  return {};
+}
+
+void ImageProvider::fetch(const Kind kind, const int id, const QString& url,
+                          const bool revalidate) {
+  const auto key = cacheKey(kind, id);
+  const auto path = fileName(kind, id);
+
+  QNetworkRequest request{QUrl{url}};
+  if (revalidate) {
+    request.setHeader(QNetworkRequest::IfModifiedSinceHeader, QFileInfo{path}.lastModified());
+  }
+
+  m_loading.insert(key);
+
+  m_manager->get(request, this, [this, kind, id, key, path](QRestReply& reply) {
+    if (reply.httpStatus() == 304) {
+      // Mark the file fresh so the next load doesn't revalidate again.
+      QFile file{path};
+      if (file.open(QIODevice::ReadWrite)) {
+        file.setFileTime(QDateTime::currentDateTime(), QFileDevice::FileModificationTime);
+      }
+      m_loading.remove(key);
+      return;
+    }
+
     if (!reply.isHttpStatusSuccess() || reply.hasError()) {
-      if (reply.httpStatus() == 404) {
+      m_loading.remove(key);
+      retryAfter(key);
+      if (kind == Kind::Anime && reply.httpStatus() == 404) {
         if (const auto item = anime::db.item(id)) {
           auto updatedItem = *item;
           updatedItem.image_url.clear();
@@ -83,71 +179,45 @@ void ImageProvider::fetchPoster(const int id, const bool revalidate) {
       return;
     }
 
-    QFile file{fileName(id)};
-    QDir().mkpath(QFileInfo(file).path());
-    if (!file.open(QIODevice::WriteOnly)) return;
-    file.write(reply.readBody());
-    m_retryAfter.remove(id);
-    reloadPoster(id);
+    // Decode, shrink and encode off the UI thread.
+    QtConcurrent::run([body = reply.readBody(), path] {
+      auto image = QImage::fromData(body);
+      if (!image.isNull()) {
+        image = shrink(image);
+        saveImage(image, path);
+      }
+      return image;
+    }).then(this, [this, kind, id, key](const QImage& image) {
+      m_loading.remove(key);
+      if (image.isNull()) {
+        retryAfter(key);
+        return;
+      }
+      m_retryAfter.remove(key);
+      QPixmapCache::insert(key, QPixmap::fromImage(image));
+      emitChanged(kind, id);
+    });
   });
 }
 
-QPixmap ImageProvider::loadPoster(const int id) {
-  if (QPixmap pixmap; QPixmapCache::find(cacheKey(id), &pixmap)) {
-    return pixmap;
-  }
-
-  if (m_loading.contains(id) || !canRetry(id)) {
-    return QPixmap{};
-  }
-
-  m_loading.insert(id);
-
-  const auto future = QtConcurrent::run([fileName = fileName(id)] {
-    QImageReader reader(fileName);
-    return reader.read();
-  });
-
-  const auto watcher = new QFutureWatcher<QImage>(this);
-  connect(watcher, &QFutureWatcherBase::finished, this, [this, id, watcher]() {
-    watcher->deleteLater();
-    m_loading.remove(id);
-
-    const QImage image = watcher->result();
-
-    if (image.isNull()) {
-      retryAfter(id);
-      fetchPoster(id);
-    } else {
-      QPixmapCache::insert(cacheKey(id), QPixmap::fromImage(image));
-      if (isStale(id)) fetchPoster(id, true);
-    }
-
+void ImageProvider::emitChanged(const Kind kind, const int id) {
+  if (kind == Kind::Anime) {
     emit posterChanged(id);
-  });
-  watcher->setFuture(future);
-
-  return QPixmap{};
-}
-
-void ImageProvider::reloadPoster(const int id) {
-  QPixmapCache::remove(cacheKey(id));
-  loadPoster(id);
-}
-
-QString ImageProvider::fileName(const int id) const {
-  const auto path = QString::fromStdString(taiga::get_data_path());
-  const auto service = sync::serviceSlug(sync::currentServiceId());
-
-  auto extension = u"jpg"_s;
-  if (const auto item = anime::db.item(id); item && !item->image_url.empty()) {
-    const QUrl url{QString::fromStdString(item->image_url)};
-    if (const auto suffix = QFileInfo(url.path()).suffix(); !suffix.isEmpty()) {
-      extension = suffix;
-    }
+  } else {
+    emit coverChanged(id);
   }
+}
 
-  return u"%1/cache/%2/media/%3.%4"_s.arg(path).arg(service).arg(id).arg(extension);
+QString ImageProvider::cacheKey(const Kind kind, const int id) const {
+  return u"%1/%2"_s.arg(kind == Kind::Anime ? u"poster"_s : u"cover"_s).arg(id);
+}
+
+QString ImageProvider::fileName(const Kind kind, const int id) const {
+  if (kind == Kind::Manga) {
+    return u"%1/myanimelist/manga/%2.jpg"_s.arg(cacheRoot()).arg(id);
+  }
+  const auto service = sync::serviceSlug(sync::currentServiceId());
+  return u"%1/%2/media/%3.jpg"_s.arg(cacheRoot()).arg(service).arg(id);
 }
 
 bool ImageProvider::isStale(const int id) const {
@@ -161,18 +231,18 @@ bool ImageProvider::isStale(const int id) const {
     return false;
   }
 
-  const QFileInfo file{fileName(id)};
+  const QFileInfo file{fileName(Kind::Anime, id)};
   return file.lastModified().daysTo(QDateTime::currentDateTime()) >= kStaleDays;
 }
 
-bool ImageProvider::canRetry(const int id) const {
-  const auto it = m_retryAfter.find(id);
+bool ImageProvider::canRetry(const QString& key) const {
+  const auto it = m_retryAfter.find(key);
   return it == m_retryAfter.end() || QDateTime::currentDateTime() >= it.value();
 }
 
-void ImageProvider::retryAfter(const int id) {
+void ImageProvider::retryAfter(const QString& key) {
   constexpr int kRetryCooldownSecs = 60;
-  m_retryAfter[id] = QDateTime::currentDateTime().addSecs(kRetryCooldownSecs);
+  m_retryAfter[key] = QDateTime::currentDateTime().addSecs(kRetryCooldownSecs);
 }
 
 }  // namespace gui

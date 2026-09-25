@@ -80,6 +80,14 @@ target_sources(taiga-gui PRIVATE
 	search/search_widget.cpp
 	search/search_widget.hpp
 
+	stats/stats_widget.cpp
+	stats/stats_widget.hpp
+
+	torrents/filter_editor.cpp
+	torrents/filter_editor.hpp
+	torrents/torrents_widget.cpp
+	torrents/torrents_widget.hpp
+
 	settings/settings_dialog.cpp
 	settings/settings_dialog.hpp
 	settings/settings_page.cpp
@@ -94,6 +102,8 @@ target_sources(taiga-gui PRIVATE
 	settings/settings_page_library.hpp
 	settings/settings_page_media_players.cpp
 	settings/settings_page_media_players.hpp
+	settings/settings_page_options.cpp
+	settings/settings_page_options.hpp
 	settings/settings_page_recognition.cpp
 	settings/settings_page_recognition.hpp
 	settings/settings_page_streaming.cpp

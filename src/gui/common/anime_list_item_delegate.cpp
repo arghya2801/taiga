@@ -28,6 +28,7 @@
 #include "gui/utils/theme.hpp"
 #include "media/anime.hpp"
 #include "media/anime_list.hpp"
+#include "media/anime_utils.hpp"
 
 namespace gui {
 
@@ -70,11 +71,31 @@ void ListItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
   // Grid lines
   if (index.column() > 0) {
     const PainterStateSaver painterStateSaver(painter);
-    painter->setPen(theme.isDark() ? QColor{255, 255, 255, 8} : QColor{0, 0, 0, 8});
+    painter->setPen(theme.isDark() ? QColor{255, 255, 255, 6} : QColor{0, 0, 0, 6});
     painter->drawLine(option.rect.topLeft(), option.rect.bottomLeft());
   }
 
   switch (index.column()) {
+    case AnimeListModel::COLUMN_AIRING: {
+      QStyledItemDelegate::paint(painter, option, index);
+      const auto anime =
+          index.data(static_cast<int>(AnimeListItemDataRole::Anime)).value<const Anime*>();
+      if (!anime) return;
+      // Same meaning as v1's squares: airing, not yet aired, finished.
+      QColor color;
+      switch (anime::airingStatus(*anime)) {
+        case anime::Status::Airing: color = theme.color(Theme::Color::Progress); break;
+        case anime::Status::NotYetAired: color = theme.color(Theme::Color::Available); break;
+        default: color = theme.color(Theme::Color::Faint); break;
+      }
+      const PainterStateSaver painterStateSaver(painter);
+      painter->setRenderHint(QPainter::Antialiasing);
+      painter->setPen(Qt::NoPen);
+      painter->setBrush(color);
+      const QRectF dot{0, 0, 8, 8};
+      painter->drawRoundedRect(dot.translated(QRectF(option.rect).center() - dot.center()), 2, 2);
+      return;
+    }
     case AnimeListModel::COLUMN_PROGRESS: {
       const PainterStateSaver painterStateSaver(painter);
       QStyledItemDelegate::paint(painter, option, index);

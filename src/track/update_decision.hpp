@@ -39,6 +39,7 @@ struct UpdateDecision {
     OutsideLibrary,
     AlreadyWatched,
     SkipsAhead,
+    AskEnabled,  // the user wants to confirm every update
   };
 
   Action action = Action::Allow;

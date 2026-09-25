@@ -41,6 +41,7 @@ class MangaWidget;
 class NavigationWidget;
 class NowPlayingWidget;
 class SearchWidget;
+class TorrentsWidget;
 class StatusBarController;
 class TrayIcon;
 
@@ -68,6 +69,12 @@ public slots:
   void navigateTo(MainWindowPage page);
   void navigateToListStatus(anime::list::Status status);
   void updateTitle();
+  void checkForUpdates(bool silent);
+  void scanAvailableEpisodes();
+  void playNextEpisode();
+  void playRandomAnime();
+  void quit();
+  void searchTorrents(const QString& title);
 
 private slots:
   void about();
@@ -77,6 +84,7 @@ private slots:
   void profile();
 
 protected:
+  void changeEvent(QEvent* event) override;
   void closeEvent(QCloseEvent* event) override;
 
 private:
@@ -102,6 +110,9 @@ private:
   SearchWidget* m_searchWidget = nullptr;
   StatusBarController* m_statusBarController = nullptr;
   TrayIcon* m_trayIcon = nullptr;
+  bool m_quitting = false;
+  QWidget* m_statsPage = nullptr;
+  TorrentsWidget* m_torrentsWidget = nullptr;
 };
 
 MainWindow* mainWindow();

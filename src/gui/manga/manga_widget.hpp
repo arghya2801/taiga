@@ -1,19 +1,19 @@
 #pragma once
 
 #include <QHash>
-#include <QWidget>
 
+#include "gui/common/page_widget.hpp"
 #include "media/manga.hpp"
 
-class QLineEdit;
-class QLabel;
-class QPushButton;
-class QTableWidget;
-class QTabWidget;
+class QAction;
+class QSortFilterProxyModel;
+class QStandardItemModel;
 
 namespace gui {
 
-class MangaWidget final : public QWidget {
+class MangaListView;
+
+class MangaWidget final : public PageWidget {
 public:
   explicit MangaWidget(QWidget* parent = nullptr);
 
@@ -22,29 +22,28 @@ private:
   void loadCache();
   void saveCache() const;
   void search();
-  void populate(QTableWidget* table, const QList<manga::Entry>& entries);
-  void filterList();
+  void populate();
   void updateCounts();
-  void editSelected(QTableWidget* table);
+  void addChapter();
+  void editSelected();
   void editEntry(manga::Entry entry);
+  void showContextMenu(const QPoint& pos);
   void setBusy(bool busy, const QString& message = {});
-  int selectedId(QTableWidget* table) const;
+  void selectId(int id);
+  int selectedId() const;
+  const manga::Entry* selectedEntry() const;
 
   QHash<int, manga::Entry> library_;
   QHash<int, manga::Entry> results_;
-  QTabWidget* tabs_ = nullptr;
-  QTableWidget* listTable_ = nullptr;
-  QTableWidget* searchTable_ = nullptr;
-  QLineEdit* filterBox_ = nullptr;
-  QLineEdit* searchBox_ = nullptr;
-  QPushButton* refreshButton_ = nullptr;
-  QPushButton* searchButton_ = nullptr;
-  QPushButton* editButton_ = nullptr;
-  QPushButton* addButton_ = nullptr;
-  QPushButton* chapterButton_ = nullptr;
-  QLabel* messageLabel_ = nullptr;
+  bool showingResults_ = false;
   QString currentStatus_;
   bool busy_ = false;
+
+  QStandardItemModel* model_ = nullptr;
+  QSortFilterProxyModel* proxyModel_ = nullptr;
+  MangaListView* view_ = nullptr;
+  QAction* refreshAction_ = nullptr;
+  QAction* chapterAction_ = nullptr;
 };
 
 }  // namespace gui

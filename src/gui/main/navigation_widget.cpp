@@ -27,6 +27,7 @@
 #include "media/anime.hpp"
 #include "media/anime_db.hpp"
 #include "media/anime_list.hpp"
+#include "media/manga.hpp"
 #include "sync/anilist/anilist.hpp"
 #include "sync/kitsu/kitsu.hpp"
 #include "sync/myanimelist/myanimelist.hpp"
@@ -108,17 +109,13 @@ void NavigationWidget::refresh() {
   auto mangaItem = addItem("Manga List", "list_alt", MainWindowPage::Manga);
   mangaItem->setExpanded(true);
   setItemData(mangaItem, NavigationItemDataRole::HasChildren, true);
-  static const QList<QPair<QString, QString>> mangaStatuses{
-      {"reading", "Reading"}, {"completed", "Completed"}, {"on_hold", "On hold"},
-      {"dropped", "Dropped"}, {"plan_to_read", "Wishlist"},
-  };
-  for (const auto& [status, label] : mangaStatuses) {
-    auto item = addChildItem(mangaItem, label);
+  for (const auto& [value, label] : manga::kStatuses) {
+    const auto status = QString::fromLatin1(value);
+    auto item = addChildItem(mangaItem, QString::fromLatin1(label));
     setItemData(item, NavigationItemDataRole::PageIndex, static_cast<int>(MainWindowPage::Manga));
     setItemData(item, NavigationItemDataRole::IsLastChild, status == "plan_to_read");
     setItemData(item, NavigationItemDataRole::MangaStatus, status);
     setItemData(item, NavigationItemDataRole::Counter, m_mangaStatusCounts.value(status));
-    if (status == "plan_to_read") item->setToolTip(0, tr("Plan to read on MyAnimeList"));
   }
 
   auto historyItem = addItem("History", "history", MainWindowPage::History);
@@ -126,7 +123,8 @@ void NavigationWidget::refresh() {
 
   addSeparator();
   addItem("Library", "folder", MainWindowPage::Library);
-  addItem("Torrents", "rss_feed", MainWindowPage::Torrents)->setDisabled(true);  // placeholder
+  addItem("Statistics", "bar_chart", MainWindowPage::Stats);
+  addItem("Torrents", "rss_feed", MainWindowPage::Torrents);
 
   setUpdatesEnabled(true);
 }

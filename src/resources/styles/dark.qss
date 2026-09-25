@@ -1,73 +1,173 @@
+/*
+Dark theme. Values match `Theme::color()`:
+  surface #1a1c21, raised #23262c, sunken #15171b, line #2c3037,
+  text #e4e6ea, muted #9ba1ab, faint #6b717b
+*/
+
 /* Toolbar */
 
 QMainWindow > QToolBar {
-  border-bottom-color: rgba(255, 255, 255, 16%);
+  border-bottom-color: #2c3037;
+}
+
+QMainWindow > QToolBar QLineEdit {
+  background-color: #15171b;
+  border: 1px solid #2c3037;
+  border-radius: 6px;
+  color: #e4e6ea;
+}
+QMainWindow > QToolBar QLineEdit:focus {
+  border-color: palette(highlight);
 }
 
 QMainWindow > #centralWidget > QSplitter {
   background-color: rgba(0, 0, 0, 30%);
 }
 QMainWindow > #centralWidget > QSplitter::handle {
-  background-color: rgba(255, 255, 255, 16%);
+  background-color: #2c3037;
 }
 
 /* Navigation */
 
+QTreeWidget#navigation {
+  color: #9ba1ab;
+}
 QTreeWidget#navigation::item:hover {
   background-color: rgba(255, 255, 255, 5%);
+  color: #e4e6ea;
 }
-QTreeWidget#navigation::item:selected:active {
-  background-color: rgba(255, 255, 255, 20%);
-}
-QTreeWidget#navigation::item:selected:!active {
-  background-color: rgba(255, 255, 255, 10%);
+QTreeWidget#navigation::item:selected {
+  background-color: rgba(255, 255, 255, 9%);
+  color: #e4e6ea;
 }
 
-/* List */
+/* Lists */
 
 QMainWindow > QWidget > QSplitter > QStackedWidget QListView,
 QMainWindow > QWidget > QSplitter > QStackedWidget QTreeView {
-  border-top-color: rgba(255, 255, 255, 16%);
+  border-top-color: #2c3037;
 }
 
 QMainWindow > QWidget > QSplitter > QStackedWidget QAbstractScrollArea {
-  background-color: #1c1c1c;
-}
-
-QTreeView#animeList QHeaderView {
-  border-bottom-color: rgba(255, 255, 255, 16%);
+  background-color: #1a1c21;
 }
 
 QTreeView#animeList,
 QTreeView#historyView,
 QTreeView#libraryView {
-  background-color: #1c1c1c;
-  alternate-background-color: rgba(255, 255, 255, 3%);
+  background-color: #1a1c21;
+  alternate-background-color: #1d1f25;
+  color: #e4e6ea;
 }
 QTreeView#animeList::item:hover,
 QTreeView#historyView::item:hover,
 QTreeView#libraryView::item:hover {
-  background-color: rgba(255, 255, 255, 5%);
+  background-color: rgba(255, 255, 255, 4%);
 }
-QTreeView#animeList::item:selected:active,
-QTreeView#historyView::item:selected:active,
-QTreeView#libraryView::item:selected:active {
-  background-color: rgba(255, 255, 255, 20%);
+QTreeView#animeList::item:selected,
+QTreeView#historyView::item:selected,
+QTreeView#libraryView::item:selected {
+  background-color: rgba(255, 255, 255, 9%);
+  color: #e4e6ea;
 }
 QTreeView#animeList::item:selected:!active,
 QTreeView#historyView::item:selected:!active,
 QTreeView#libraryView::item:selected:!active {
-  background-color: rgba(255, 255, 255, 10%);
+  background-color: rgba(255, 255, 255, 6%);
+}
+
+QHeaderView {
+  background-color: #1a1c21;
+}
+QHeaderView::section {
+  background-color: #1a1c21;
+  color: #9ba1ab;
+  border: none;
+  border-bottom: 1px solid #2c3037;
+  border-right: 1px solid #23262c;
+}
+QHeaderView::section:hover {
+  color: #e4e6ea;
+}
+
+/* Scrollbars: thin, no arrows */
+
+QScrollBar:vertical,
+QScrollBar:horizontal {
+  background: transparent;
+  border: none;
+}
+QScrollBar:vertical {
+  width: 10px;
+}
+QScrollBar:horizontal {
+  height: 10px;
+}
+QScrollBar::handle:vertical,
+QScrollBar::handle:horizontal {
+  background: rgba(255, 255, 255, 14%);
+  border-radius: 3px;
+  margin: 2px;
+}
+QScrollBar::handle:vertical {
+  min-height: 32px;
+}
+QScrollBar::handle:horizontal {
+  min-width: 32px;
+}
+QScrollBar::handle:hover {
+  background: rgba(255, 255, 255, 26%);
+}
+QScrollBar::add-line,
+QScrollBar::sub-line {
+  width: 0;
+  height: 0;
+}
+QScrollBar::add-page,
+QScrollBar::sub-page {
+  background: none;
+}
+
+/* Menus and tooltips */
+
+QMenu {
+  background-color: #23262c;
+  border: 1px solid #2c3037;
+  padding: 4px;
+}
+QMenu::item {
+  padding: 5px 24px 5px 28px;
+  border-radius: 4px;
+  color: #e4e6ea;
+}
+QMenu::item:selected {
+  background-color: rgba(255, 255, 255, 8%);
+}
+QMenu::item:disabled {
+  color: #6b717b;
+}
+QMenu::separator {
+  height: 1px;
+  background-color: #2c3037;
+  margin: 4px 8px;
+}
+
+QToolTip {
+  background-color: #23262c;
+  color: #e4e6ea;
+  border: 1px solid #2c3037;
+  padding: 4px 6px;
 }
 
 /* Now Playing */
 
 #nowPlaying {
-  border-top-color: rgba(255, 255, 255, 16%);
+  border-top-color: #2c3037;
 }
 
 /* Statusbar */
 
 QStatusBar {
-  border-top-color: rgba(255, 255, 255, 16%);
+  border-top-color: #2c3037;
+  color: #9ba1ab;
 }

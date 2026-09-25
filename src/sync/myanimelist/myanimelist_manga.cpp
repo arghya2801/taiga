@@ -67,6 +67,9 @@ manga::Entry parseManga(const QJsonObject& node, const QJsonObject& status = {})
   entry.rereadValue = listStatus["reread_value"].toInt();
   entry.priority = listStatus["priority"].toInt();
   entry.comments = listStatus["comments"].toString();
+  entry.startedReading = listStatus["start_date"].toString();
+  entry.finishedReading = listStatus["finish_date"].toString();
+  entry.updatedAt = listStatus["updated_at"].toString();
   for (const auto& value : listStatus["tags"].toArray()) {
     const auto tag = value.toString();
     if (!tag.isEmpty()) entry.tags.append(tag);
@@ -75,11 +78,11 @@ manga::Entry parseManga(const QJsonObject& node, const QJsonObject& status = {})
 }
 
 QString mangaFields() {
-  return u"id,title,main_picture,media_type,num_chapters,num_volumes,mean"_s;
+  return u"id,title,main_picture,media_type,status,num_chapters,num_volumes,mean"_s;
 }
 
 QString mangaListFields() {
-  return u"status,score,num_chapters_read,num_volumes_read,is_rereading,num_times_reread,reread_value,priority,tags,comments"_s;
+  return u"status,score,num_chapters_read,num_volumes_read,is_rereading,num_times_reread,reread_value,priority,tags,comments,start_date,finish_date,updated_at"_s;
 }
 
 }  // namespace

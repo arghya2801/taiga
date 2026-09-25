@@ -218,12 +218,14 @@ void Service::search(const SearchParams& params, const int offset) {
     const auto root = json->object();
 
     QList<int> ids;
+    QList<Anime> items;
     for (const auto& value : root["data"].toArray()) {
       if (const auto item = parseAnime(value)) {
-        anime::db.updateItem(*item);
+        items.append(*item);
         ids.append(item->id);
       }
     }
+    anime::db.updateItems(items);
 
     emit searchCompleted(params, ids);
 

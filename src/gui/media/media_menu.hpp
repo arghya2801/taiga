@@ -30,6 +30,8 @@ class QItemSelectionModel;
 
 namespace gui {
 
+void openAnimeFolder(const Anime& item);
+
 class MediaMenu final : public QMenu {
   Q_OBJECT
   Q_DISABLE_COPY_MOVE(MediaMenu)

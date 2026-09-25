@@ -9,11 +9,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
-#include <QNetworkAccessManager>
-#include <QNetworkReply>
-#include <QNetworkRequest>
 #include <QPlainTextEdit>
-#include <QPixmap>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSpinBox>
@@ -24,17 +20,13 @@
 #include <utility>
 
 #include "base/string.hpp"
+#include "gui/common/poster_widget.hpp"
+#include "gui/utils/image_provider.hpp"
 #include "sync/myanimelist/myanimelist.hpp"
 
 namespace gui {
 
 namespace {
-
-constexpr std::pair<const char*, const char*> kStatuses[] = {
-    {"reading", "Reading"},       {"completed", "Completed"},
-    {"on_hold", "On hold"},        {"dropped", "Dropped"},
-    {"plan_to_read", "Wishlist"},
-};
 
 QString displayValue(int value) {
   return value > 0 ? QString::number(value) : u"?"_s;
@@ -51,11 +43,11 @@ MangaDialog::MangaDialog(QWidget* parent, manga::Entry entry)
   auto* body = new QHBoxLayout();
   root->addLayout(body, 1);
 
-  coverLabel_ = new QLabel(tr("Loading cover..."), this);
-  coverLabel_->setFixedSize(190, 285);
-  coverLabel_->setAlignment(Qt::AlignCenter);
-  coverLabel_->setWordWrap(true);
-  body->addWidget(coverLabel_, 0, Qt::AlignTop);
+  // Same width and placeholder ratio as `MediaDialog`.
+  poster_ = new PosterWidget(this);
+  poster_->setFixedSize(200, 300);
+  poster_->setLoading(true);
+  body->addWidget(poster_, 0, Qt::AlignTop);
 
   auto* right = new QVBoxLayout();
   body->addLayout(right, 1);
@@ -68,6 +60,7 @@ MangaDialog::MangaDialog(QWidget* parent, manga::Entry entry)
   titleLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
   right->addWidget(titleLabel_);
   alternativeTitlesLabel_ = new QLabel(this);
+  alternativeTitlesLabel_->setEnabled(false);
   alternativeTitlesLabel_->setWordWrap(true);
   alternativeTitlesLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
   alternativeTitlesLabel_->hide();
@@ -78,14 +71,14 @@ MangaDialog::MangaDialog(QWidget* parent, manga::Entry entry)
 
   auto* detailsPage = new QWidget(tabs);
   auto* detailsLayout = new QVBoxLayout(detailsPage);
-  detailsLoadLabel_ = new QLabel(tr("Loading details from MyAnimeList..."), detailsPage);
-  detailsLayout->addWidget(detailsLoadLabel_);
   auto* detailsScroll = new QScrollArea(detailsPage);
   detailsScroll->setWidgetResizable(true);
   detailsScroll->setFrameShape(QFrame::NoFrame);
   auto* detailsContent = new QWidget(detailsScroll);
   auto* detailsContentLayout = new QVBoxLayout(detailsContent);
   infoLayout_ = new QFormLayout();
+  infoLayout_->setHorizontalSpacing(9);
+  infoLayout_->setVerticalSpacing(2);
   detailsContentLayout->addLayout(infoLayout_);
   auto* synopsisHeader = new QLabel(tr("Synopsis"), detailsContent);
   auto synopsisFont = synopsisHeader->font();
@@ -110,7 +103,7 @@ MangaDialog::MangaDialog(QWidget* parent, manga::Entry entry)
   form->setVerticalSpacing(10);
 
   statusBox_ = new QComboBox(listContent);
-  for (const auto& [value, label] : kStatuses)
+  for (const auto& [value, label] : manga::kStatuses)
     statusBox_->addItem(QLatin1String(label), QLatin1String(value));
   const auto status = entry_.status.isEmpty() ? u"plan_to_read"_s : entry_.status;
   statusBox_->setCurrentIndex(statusBox_->findData(status));
@@ -186,17 +179,22 @@ MangaDialog::MangaDialog(QWidget* parent, manga::Entry entry)
   connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
   root->addWidget(buttons);
 
+  connect(&imageProvider, &ImageProvider::coverChanged, this, [this](int id) {
+    if (id == entry_.id) loadCover(loadedCoverUrl_);
+  });
+
   showDetails(entry_);
   auto* service = sync::myanimelist::Service::instance();
   connect(service, &sync::myanimelist::Service::mangaDetailsFetched, this,
           [this](const manga::Entry& details) {
             if (details.id != entry_.id) return;
-            detailsLoadLabel_->hide();
             showDetails(details);
           });
   connect(service, &sync::myanimelist::Service::mangaDetailsFailed, this, [this](int id) {
-    if (id == entry_.id)
-      detailsLoadLabel_->setText(tr("Could not load more details. List editing is still available."));
+    if (id != entry_.id) return;
+    poster_->setLoading(false);
+    if (entry_.synopsis.isEmpty())
+      synopsis_->setPlainText(tr("Couldn't load details from MyAnimeList. You can still edit your list entry."));
   });
   service->fetchMangaDetails(entry_.id);
 }
@@ -254,22 +252,16 @@ void MangaDialog::showDetails(const manga::Entry& details) {
 }
 
 void MangaDialog::loadCover(const QString& url) {
-  if (url.isEmpty() || url == loadedCoverUrl_) return;
+  if (url.isEmpty()) {
+    poster_->setLoading(false);
+    return;
+  }
   loadedCoverUrl_ = url;
-  auto* manager = new QNetworkAccessManager(this);
-  auto* reply = manager->get(QNetworkRequest(QUrl(url)));
-  connect(reply, &QNetworkReply::finished, this, [this, reply] {
-    const auto data = reply->readAll();
-    reply->deleteLater();
-    QPixmap cover;
-    if (cover.loadFromData(data)) {
-      coverLabel_->setPixmap(cover.scaled(coverLabel_->size(), Qt::KeepAspectRatio,
-                                         Qt::SmoothTransformation));
-      coverLabel_->setText({});
-    } else {
-      coverLabel_->setText(tr("Cover unavailable"));
-    }
-  });
+  const auto cover = imageProvider.loadCover(entry_.id, url);
+  if (cover.isNull()) return;  // `coverChanged` calls back when it's ready
+  poster_->setLoading(false);
+  poster_->setPixmap(cover);
+  poster_->setFixedHeight(cover.height() * poster_->width() / cover.width());
 }
 
 }  // namespace gui

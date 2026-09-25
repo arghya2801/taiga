@@ -78,6 +78,9 @@ QString formatUpdateState(const track::UpdateState& state) {
       }
 
     case Phase::Confirming:
+      if (state.reason == Reason::AskEnabled) {
+        return u"Update list to episode %1?"_s.arg(state.episode);
+      }
       return u"Episode %1 is ahead of your progress (%2)"_s.arg(state.episode)
           .arg(state.previousEpisode);
 

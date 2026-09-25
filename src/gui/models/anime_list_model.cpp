@@ -24,26 +24,34 @@
 #include <QFont>
 #include <QPalette>
 #include <QSize>
+#include <QTimer>
 
+#include "base/string.hpp"
 #include "gui/utils/format.hpp"
 #include "gui/utils/image_provider.hpp"
 #include "gui/utils/rating.hpp"
+#include "gui/utils/theme.hpp"
 #include "media/anime_db.hpp"
 #include "media/anime_list_utils.hpp"
 #include "media/anime_season.hpp"
 #include "media/anime_utils.hpp"
+#include "taiga/options.hpp"
+#include "track/scanner.hpp"
 
 namespace gui {
 
 AnimeListModel::AnimeListModel(QObject* parent) : QAbstractListModel(parent) {
-  beginInsertRows({}, 0, anime::db.items().size());
   m_ids = anime::db.items().keys();
-  endInsertRows();
+  rebuildRows();
 
   connect(&imageProvider, &ImageProvider::posterChanged, this, [this](int id) {
-    if (const auto row = m_ids.indexOf(id); row > -1) {
+    if (const auto row = m_rows.value(id, -1); row > -1) {
       emit dataChanged(index(row), index(row), {static_cast<int>(AnimeListItemDataRole::Poster)});
     }
+  });
+
+  connect(&track::availableEpisodes, &track::AvailableEpisodes::scanFinished, this, [this] {
+    if (!m_ids.isEmpty()) emit dataChanged(index(0, 0), index(m_ids.size() - 1, NUM_COLUMNS - 1));
   });
 
   connect(&anime::db, &anime::Database::itemUpdated, this, &AnimeListModel::refreshRow);
@@ -52,18 +60,37 @@ AnimeListModel::AnimeListModel(QObject* parent) : QAbstractListModel(parent) {
   connect(&anime::db, &anime::Database::entryDeleted, this, &AnimeListModel::refreshRow);
 }
 
+// Sync emits one signal per item. Coalescing them into a single insert and a single
+// `dataChanged` keeps the proxy model from re-sorting once per item.
 void AnimeListModel::refreshRow(int id) {
-  if (const auto row = m_ids.indexOf(id); row > -1) {
-    emit dataChanged(index(row, 0), index(row, NUM_COLUMNS - 1));
-  } else {
-    addIds({id});
+  if (m_pending.isEmpty()) QTimer::singleShot(0, this, &AnimeListModel::flushPending);
+  m_pending.insert(id);
+}
+
+void AnimeListModel::flushPending() {
+  QList<int> newIds;
+  int first = m_ids.size();
+  int last = -1;
+  for (const int id : std::as_const(m_pending)) {
+    if (const auto row = m_rows.value(id, -1); row > -1) {
+      first = std::min(first, row);
+      last = std::max(last, row);
+    } else if (anime::db.item(id)) {
+      newIds.append(id);
+    }
   }
+  m_pending.clear();
+
+  if (last > -1) emit dataChanged(index(first, 0), index(last, NUM_COLUMNS - 1));
+  addIds(newIds);
 }
 
 void AnimeListModel::deleteRow(int id) {
-  if (const auto row = m_ids.indexOf(id); row > -1) {
+  m_pending.remove(id);
+  if (const auto row = m_rows.value(id, -1); row > -1) {
     beginRemoveRows({}, row, row);
     m_ids.removeAt(row);
+    rebuildRows();
     endRemoveRows();
   }
 }
@@ -71,7 +98,10 @@ void AnimeListModel::deleteRow(int id) {
 void AnimeListModel::addIds(const QList<int>& ids) {
   QList<int> newIds;
   for (const int id : ids) {
-    if (!m_ids.contains(id)) newIds.append(id);
+    if (!m_rows.contains(id)) {
+      m_rows.insert(id, m_ids.size() + newIds.size());
+      newIds.append(id);
+    }
   }
   if (newIds.isEmpty()) return;
 
@@ -79,6 +109,12 @@ void AnimeListModel::addIds(const QList<int>& ids) {
   beginInsertRows({}, first, first + newIds.size() - 1);
   m_ids.append(newIds);
   endInsertRows();
+}
+
+void AnimeListModel::rebuildRows() {
+  m_rows.clear();
+  m_rows.reserve(m_ids.size());
+  for (int row = 0; row < m_ids.size(); ++row) m_rows.insert(m_ids.at(row), row);
 }
 
 int AnimeListModel::rowCount(const QModelIndex&) const {
@@ -131,10 +167,20 @@ QVariant AnimeListModel::data(const QModelIndex& index, int role) const {
       }
       break;
 
+    case Qt::FontRole:
+      if (index.column() == COLUMN_TITLE && hasNewEpisode(*anime, entry)) {
+        QFont font;
+        font.setBold(true);
+        return font;
+      }
+      break;
+
     case Qt::ToolTipRole:
       switch (index.column()) {
         case COLUMN_TITLE:
           return QString::fromStdString(anime::preferredTitle(*anime));
+        case COLUMN_AIRING:
+          return formatStatus(anime::airingStatus(*anime));
         case COLUMN_SEASON:
           return formatFuzzyDate(anime->date_started);
         case COLUMN_LAST_UPDATED:
@@ -244,10 +290,15 @@ QVariant AnimeListModel::headerData(int section, Qt::Orientation orientation, in
         case COLUMN_COMPLETED: return tr("Completed");
         case COLUMN_LAST_UPDATED: return tr("Last updated");
         case COLUMN_NOTES: return tr("Notes");
+        case COLUMN_AIRING: return QString{};
       }
       // clang-format on
       break;
     }
+
+    case Qt::ToolTipRole:
+      if (section == COLUMN_AIRING) return tr("Airing status");
+      break;
 
     case Qt::TextAlignmentRole: {
       switch (section) {
@@ -293,6 +344,11 @@ Qt::ItemFlags AnimeListModel::flags(const QModelIndex& index) const {
   if (!index.isValid()) return Qt::NoItemFlags;
 
   return QAbstractListModel::flags(index) | Qt::ItemIsEditable;
+}
+
+bool hasNewEpisode(const Anime& anime, const ListEntry* entry) {
+  return entry && !entry->pending_delete && taiga::opt::highlightNewEpisodes.get() &&
+         track::availableEpisodes.hasNext(anime.id, entry->watched_episodes);
 }
 
 const Anime* AnimeListModel::getAnime(const QModelIndex& index) const {

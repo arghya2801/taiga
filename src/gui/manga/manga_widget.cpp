@@ -1,33 +1,39 @@
 #include "manga_widget.hpp"
 
-#include <QCryptographicHash>
-#include <QAbstractItemView>
+#include <QAction>
 #include <QByteArray>
+#include <QCryptographicHash>
+#include <QDateTime>
+#include <QDesktopServices>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QHeaderView>
-#include <QHBoxLayout>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QMessageBox>
-#include <QPushButton>
+#include <QPainter>
 #include <QSaveFile>
-#include <QTabWidget>
-#include <QTableWidget>
-#include <QVBoxLayout>
-
-#include <algorithm>
-#include <array>
-#include <utility>
+#include <QSortFilterProxyModel>
+#include <QStandardItemModel>
+#include <QStyledItemDelegate>
+#include <QToolBar>
+#include <QTreeView>
+#include <QUrl>
 
 #include "base/string.hpp"
 #include "gui/main/main_window.hpp"
 #include "gui/main/navigation_widget.hpp"
+#include "gui/main/status_bar_controller.hpp"
 #include "gui/manga/manga_dialog.hpp"
+#include "gui/utils/format.hpp"
+#include "gui/utils/painter_state_saver.hpp"
+#include "gui/utils/painters.hpp"
+#include "gui/utils/theme.hpp"
+#include "gui/utils/widgets.hpp"
 #include "sync/myanimelist/myanimelist.hpp"
 #include "taiga/accounts.hpp"
 #include "taiga/path.hpp"
@@ -36,20 +42,24 @@ namespace gui {
 
 namespace {
 
-constexpr auto kStatuses = std::to_array<std::pair<const char*, const char*>>({
-    {"reading", "Reading"},
-    {"completed", "Completed"},
-    {"on_hold", "On hold"},
-    {"dropped", "Dropped"},
-    {"plan_to_read", "Plan to read"},
-});
+enum Column {
+  kTitle,
+  kChapters,
+  kVolumes,
+  kScore,
+  kType,
+  kMean,
+  kPublishing,
+  kRereads,
+  kStarted,
+  kCompleted,
+  kUpdated,
+  kColumnCount
+};
 
-QString statusLabel(const QString& status) {
-  for (const auto& [value, label] : kStatuses) {
-    if (status == QLatin1String(value)) return QLatin1String(label);
-  }
-  return status;
-}
+constexpr int kSortRole = Qt::UserRole;
+constexpr int kIdRole = Qt::UserRole + 1;
+constexpr int kTotalRole = Qt::UserRole + 2;
 
 bool sameListFields(const manga::Entry& first, const manga::Entry& second) {
   return first.status == second.status && first.chaptersRead == second.chaptersRead &&
@@ -59,37 +69,39 @@ bool sameListFields(const manga::Entry& first, const manga::Entry& second) {
          first.tags == second.tags && first.comments == second.comments;
 }
 
-QTableWidget* makeTable(QWidget* parent) {
-  auto* table = new QTableWidget(parent);
-  table->setColumnCount(7);
-  table->setHorizontalHeaderLabels(
-      {"Title", "Chapters", "Volumes", "Status", "Score", "Type", "Mean"});
-  table->setSelectionBehavior(QAbstractItemView::SelectRows);
-  table->setSelectionMode(QAbstractItemView::SingleSelection);
-  table->setEditTriggers(QAbstractItemView::NoEditTriggers);
-  table->setAlternatingRowColors(true);
-  table->setSortingEnabled(true);
-  table->sortItems(0, Qt::AscendingOrder);
-  table->verticalHeader()->hide();
-  table->horizontalHeader()->setStretchLastSection(false);
-  table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
-  const int widths[] = {110, 100, 110, 55, 85, 60};
-  for (int column = 1; column < 7; ++column)
-    table->setColumnWidth(column, widths[column - 1]);
-  return table;
+// MyAnimeList sends types like "light_novel".
+QString formatType(QString type) {
+  type.replace('_', ' ');
+  if (!type.isEmpty()) type[0] = type[0].toUpper();
+  return type;
 }
 
-QTableWidgetItem* numberItem(int value, const QString& text) {
-  class NumericItem final : public QTableWidgetItem {
-  public:
-    explicit NumericItem(const QString& text) : QTableWidgetItem(text) {}
-    bool operator<(const QTableWidgetItem& other) const override {
-      return data(Qt::UserRole).toInt() < other.data(Qt::UserRole).toInt();
-    }
+QList<QStandardItem*> makeRow(const manga::Entry& entry) {
+  const auto item = [](const QString& text, const QVariant& sortKey, bool centered = true) {
+    auto* item = new QStandardItem(text);
+    item->setData(sortKey, kSortRole);
+    item->setEditable(false);
+    if (centered) item->setTextAlignment(Qt::AlignCenter);
+    return item;
   };
-  auto* item = new NumericItem(text);
-  item->setData(Qt::UserRole, value);
-  return item;
+  QList<QStandardItem*> row{
+      item(entry.title, entry.title, false),
+      item({}, entry.chaptersRead),
+      item(u"%1/%2"_s.arg(entry.volumesRead).arg(formatNumber(entry.volumes, "?")),
+           entry.volumesRead),
+      item(formatNumber(entry.score), entry.score),
+      item(formatType(entry.type), entry.type),
+      item(entry.mean > 0 ? QString::number(entry.mean, 'f', 2) : u"-"_s, entry.mean),
+      item(formatType(entry.publicationStatus), entry.publicationStatus),
+      item(formatNumber(entry.timesReread), entry.timesReread),
+      item(entry.startedReading, entry.startedReading),
+      item(entry.finishedReading, entry.finishedReading),
+      item(QDateTime::fromString(entry.updatedAt, Qt::ISODate).toLocalTime().toString(u"yyyy-MM-dd"_s),
+           entry.updatedAt),
+  };
+  row[kTitle]->setData(entry.id, kIdRole);
+  row[kChapters]->setData(entry.chapters, kTotalRole);
+  return row;
 }
 
 QString cachePath() {
@@ -100,145 +112,193 @@ QString cachePath() {
                                     QString::fromLatin1(key.constData()));
 }
 
+void showStatus(const QString& text, bool spin) {
+  mainWindow()->statusBarController()->showMessage({
+      .source = StatusBarController::Source::Sync,
+      .text = text,
+      .spin = spin,
+  });
+}
+
+// Mirrors `ListItemDelegate`, with the progress bar driven by chapters.
+class MangaItemDelegate final : public QStyledItemDelegate {
+public:
+  using QStyledItemDelegate::QStyledItemDelegate;
+
+  void paint(QPainter* painter, const QStyleOptionViewItem& option,
+             const QModelIndex& index) const override {
+    if (index.column() > 0) {
+      const PainterStateSaver painterStateSaver(painter);
+      painter->setPen(theme.isDark() ? QColor{255, 255, 255, 6} : QColor{0, 0, 0, 6});
+      painter->drawLine(option.rect.topLeft(), option.rect.bottomLeft());
+    }
+
+    QStyledItemDelegate::paint(painter, option, index);
+
+    if (index.column() == kChapters) {
+      const PainterStateSaver painterStateSaver(painter);
+      QStyleOptionViewItem opt = option;
+      opt.rect.adjust(2, 2, -2, -2);
+      paintProgressBar(painter, opt, index.data(kSortRole).toInt(),
+                       index.data(kTotalRole).toInt());
+    }
+  }
+
+  QSize sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const override {
+    return index.isValid() ? QSize(0, 24) : QStyledItemDelegate::sizeHint(option, index);
+  }
+};
+
 }  // namespace
 
-MangaWidget::MangaWidget(QWidget* parent) : QWidget(parent) {
-  auto* layout = new QVBoxLayout(this);
-  tabs_ = new QTabWidget(this);
-  layout->addWidget(tabs_);
-  messageLabel_ = new QLabel(this);
-  layout->addWidget(messageLabel_);
+// Set up like the anime `ListView`.
+class MangaListView final : public QTreeView {
+public:
+  explicit MangaListView(QWidget* parent) : QTreeView(parent) {
+    setObjectName("animeList");
+    setFrameShape(QFrame::Shape::NoFrame);
+    setAlternatingRowColors(true);
+    setItemDelegate(new MangaItemDelegate(this));
+    setAllColumnsShowFocus(true);
+    setExpandsOnDoubleClick(false);
+    setItemsExpandable(false);
+    setRootIsDecorated(false);
+    setUniformRowHeights(true);
+    setContextMenuPolicy(Qt::CustomContextMenu);
+  }
 
-  auto* listPage = new QWidget(tabs_);
-  auto* listLayout = new QVBoxLayout(listPage);
-  auto* listBar = new QHBoxLayout();
-  filterBox_ = new QLineEdit(listPage);
-  filterBox_->setPlaceholderText(tr("Filter manga"));
-  filterBox_->setClearButtonEnabled(true);
-  refreshButton_ = new QPushButton(tr("Refresh"), listPage);
-  chapterButton_ = new QPushButton(tr("+1 chapter"), listPage);
-  editButton_ = new QPushButton(tr("Details"), listPage);
-  listBar->addWidget(filterBox_, 1);
-  listBar->addWidget(refreshButton_);
-  listBar->addWidget(chapterButton_);
-  listBar->addWidget(editButton_);
-  listLayout->addLayout(listBar);
-  listTable_ = makeTable(listPage);
-  listLayout->addWidget(listTable_);
-  tabs_->addTab(listPage, tr("My manga"));
+  QString emptyText;
 
-  auto* searchPage = new QWidget(tabs_);
-  auto* searchLayout = new QVBoxLayout(searchPage);
-  auto* searchBar = new QHBoxLayout();
-  searchBox_ = new QLineEdit(searchPage);
-  searchBox_->setPlaceholderText(tr("Search MyAnimeList manga"));
-  searchBox_->setClearButtonEnabled(true);
-  searchButton_ = new QPushButton(tr("Search"), searchPage);
-  addButton_ = new QPushButton(tr("Details / add"), searchPage);
-  searchBar->addWidget(searchBox_, 1);
-  searchBar->addWidget(searchButton_);
-  searchBar->addWidget(addButton_);
-  searchLayout->addLayout(searchBar);
-  searchTable_ = makeTable(searchPage);
-  searchLayout->addWidget(searchTable_);
-  tabs_->addTab(searchPage, tr("Find manga"));
+protected:
+  void paintEvent(QPaintEvent* event) override {
+    if (model() && model()->rowCount() == 0) paintEmptyListText(this, emptyText);
+    QTreeView::paintEvent(event);
+  }
+};
 
-  auto* service = sync::myanimelist::Service::instance();
-  connect(refreshButton_, &QPushButton::clicked, this, [this] { refresh(); });
-  connect(searchButton_, &QPushButton::clicked, this, [this] { search(); });
-  connect(searchBox_, &QLineEdit::returnPressed, this, [this] { search(); });
-  connect(filterBox_, &QLineEdit::textChanged, this, [this] { filterList(); });
+MangaWidget::MangaWidget(QWidget* parent)
+    : PageWidget(parent),
+      model_(new QStandardItemModel(0, kColumnCount, this)),
+      proxyModel_(new QSortFilterProxyModel(this)),
+      view_(new MangaListView(this)) {
+  model_->setHorizontalHeaderLabels(
+      {tr("Title"), tr("Chapters"), tr("Volumes"), tr("Score"), tr("Type"), tr("Average"),
+       tr("Publishing"), tr("Rereads"), tr("Started"), tr("Completed"), tr("Last updated")});
+  for (int column = kChapters; column < kColumnCount; ++column)
+    model_->horizontalHeaderItem(column)->setTextAlignment(Qt::AlignCenter);
+
+  proxyModel_->setSourceModel(model_);
+  proxyModel_->setSortRole(kSortRole);
+  proxyModel_->setSortCaseSensitivity(Qt::CaseInsensitive);
+  proxyModel_->setFilterKeyColumn(kTitle);
+  proxyModel_->setFilterCaseSensitivity(Qt::CaseInsensitive);
+
+  view_->setModel(proxyModel_);
+  auto* header = view_->header();
+  header->setFirstSectionMovable(true);
+  header->setStretchLastSection(false);
+  header->setTextElideMode(Qt::ElideRight);
+  header->resizeSection(kTitle, 295);
+  header->resizeSection(kChapters, 150);
+  for (int column = kVolumes; column < kColumnCount; ++column) header->resizeSection(column, 75);
+  header->resizeSection(kPublishing, 110);
+  header->resizeSection(kUpdated, 100);
+  for (int column = kPublishing; column < kColumnCount; ++column) header->hideSection(column);
+  setupHeaderMenu(header, u"mangaList"_s);
+  view_->sortByColumn(kTitle, Qt::AscendingOrder);
+  view_->setSortingEnabled(true);
+  layout()->addWidget(view_);
+
+  refreshAction_ = m_toolbar->addAction(theme.getIcon("sync"), tr("Refresh"), this,
+                                        [this] { refresh(); });
+  chapterAction_ = m_toolbar->addAction(theme.getIcon("skip_next"), tr("Read next chapter"),
+                                        this, [this] { addChapter(); });
+
+  auto* searchBox = mainWindow()->searchBox();
+  connect(searchBox, &QLineEdit::textChanged, this, [this](const QString& text) {
+    if (showingResults_ && text.isEmpty()) {
+      showingResults_ = false;
+      populate();
+    } else if (!showingResults_) {
+      proxyModel_->setFilterFixedString(text);
+    }
+  });
+  connect(searchBox, &QLineEdit::returnPressed, this, [this] {
+    if (isVisible()) search();
+  });
   connect(mainWindow()->navigation(), &NavigationWidget::currentMangaStatusChanged, this,
           [this](const QString& status) {
             currentStatus_ = status;
-            tabs_->setCurrentIndex(0);
-            filterList();
+            showingResults_ = false;
+            populate();
           });
-  connect(editButton_, &QPushButton::clicked, this, [this] { editSelected(listTable_); });
-  connect(addButton_, &QPushButton::clicked, this, [this] { editSelected(searchTable_); });
-  connect(listTable_, &QTableWidget::itemDoubleClicked, this,
-          [this] { editSelected(listTable_); });
-  connect(searchTable_, &QTableWidget::itemDoubleClicked, this,
-          [this] { editSelected(searchTable_); });
-  connect(chapterButton_, &QPushButton::clicked, this, [this, service] {
-    if (busy_ || taiga::accounts.myanimelistAccessToken().empty()) return;
-    const int id = selectedId(listTable_);
-    if (!id || !library_.contains(id)) return;
-    auto entry = library_.value(id);
-    if (entry.chapters > 0 && entry.chaptersRead >= entry.chapters) return;
-    const auto previous = entry;
-    ++entry.chaptersRead;
-    if (entry.status == "plan_to_read") entry.status = "reading";
-    setBusy(true, tr("Saving manga progress..."));
-    service->updateMangaEntry(entry, previous);
-  });
+  connect(view_, &QAbstractItemView::activated, this, [this] { editSelected(); });
+  connect(view_, &QWidget::customContextMenuRequested, this, &MangaWidget::showContextMenu);
 
+  auto* service = sync::myanimelist::Service::instance();
   connect(service, &sync::myanimelist::Service::mangaListFetched, this,
           [this](const QList<manga::Entry>& entries) {
             library_.clear();
             for (const auto& entry : entries) library_.insert(entry.id, entry);
-            populate(listTable_, entries);
-            filterList();
+            populate();
             updateCounts();
             saveCache();
-            setBusy(false, tr("%1 manga loaded.").arg(entries.size()));
+            setBusy(false);
+            mainWindow()->statusBarController()->clearMessage(StatusBarController::Source::Sync);
           });
   connect(service, &sync::myanimelist::Service::mangaSearchCompleted, this,
           [this](const QString& query, const QList<manga::Entry>& entries) {
-            if (query != searchBox_->text().trimmed()) {
-              setBusy(false, tr("Search text changed. Press Search for new results."));
+            setBusy(false);
+            if (query != mainWindow()->searchBox()->text().trimmed()) {
+              mainWindow()->statusBarController()->clearMessage(
+                  StatusBarController::Source::Sync);
               return;
             }
             results_.clear();
             for (const auto& entry : entries) results_.insert(entry.id, entry);
-            populate(searchTable_, entries);
-            setBusy(false, tr("%1 results.").arg(entries.size()));
+            showingResults_ = true;
+            populate();
+            showStatus(tr("Found %1 manga on MyAnimeList.").arg(entries.size()), false);
           });
   connect(service, &sync::myanimelist::Service::mangaEntryUpdated, this,
           [this](const manga::Entry& entry) {
             library_.insert(entry.id, entry);
             if (results_.contains(entry.id)) results_.insert(entry.id, entry);
-            populate(listTable_, library_.values());
-            populate(searchTable_, results_.values());
-            filterList();
+            populate();
             updateCounts();
             saveCache();
-            setBusy(false, tr("Manga saved to MyAnimeList."));
+            setBusy(false, tr("Saved %1 to MyAnimeList.").arg(entry.title));
           });
   connect(service, &sync::myanimelist::Service::mangaEntryDeleted, this, [this](int id) {
-    library_.remove(id);
+    const auto title = library_.take(id).title;
     if (results_.contains(id)) {
-      auto entry = results_.value(id);
+      auto& entry = results_[id];
       entry.onList = false;
       entry.status.clear();
       entry.chaptersRead = entry.volumesRead = entry.score = 0;
-      results_.insert(id, entry);
     }
-    populate(listTable_, library_.values());
-    populate(searchTable_, results_.values());
-    filterList();
+    populate();
     updateCounts();
     saveCache();
-    setBusy(false, tr("Manga removed from MyAnimeList."));
+    setBusy(false, tr("Removed %1 from MyAnimeList.").arg(title));
   });
-  connect(service, &sync::Service::errorOccurred, this, [this](const QString& message) {
-    if (!busy_) return;
-    setBusy(false, message);
-  });
+  // MainWindow already puts service errors in the status bar.
+  connect(service, &sync::Service::errorOccurred, this, [this] { setBusy(false); });
   connect(service, &sync::Service::authenticationCompleted, this, [this](bool authenticated) {
-    if (!authenticated && busy_) setBusy(false, tr("MyAnimeList login failed."));
+    if (!authenticated) setBusy(false);
   });
 
   loadCache();
-  setBusy(false);
   refresh();
 }
 
 void MangaWidget::loadCache() {
   QFile file(cachePath());
-  if (!file.open(QIODevice::ReadOnly)) return;
+  if (!file.open(QIODevice::ReadOnly)) {
+    populate();
+    return;
+  }
   const auto document = QJsonDocument::fromJson(file.readAll());
-  if (!document.isArray()) return;
   for (const auto& value : document.array()) {
     const auto object = value.toObject();
     manga::Entry entry;
@@ -259,13 +319,15 @@ void MangaWidget::loadCache() {
     entry.comments = object["comments"].toString();
     for (const auto& tag : object["tags"].toArray()) entry.tags.append(tag.toString());
     entry.mean = object["mean"].toDouble();
+    entry.publicationStatus = object["publicationStatus"].toString();
+    entry.startedReading = object["startedReading"].toString();
+    entry.finishedReading = object["finishedReading"].toString();
+    entry.updatedAt = object["updatedAt"].toString();
     entry.onList = true;
     if (entry.id > 0 && !entry.title.isEmpty()) library_.insert(entry.id, entry);
   }
-  populate(listTable_, library_.values());
-  filterList();
+  populate();
   updateCounts();
-  messageLabel_->setText(tr("Showing saved manga while MyAnimeList refreshes."));
 }
 
 void MangaWidget::saveCache() const {
@@ -290,7 +352,11 @@ void MangaWidget::saveCache() const {
                                {"priority", entry.priority},
                                {"tags", QJsonArray::fromStringList(entry.tags)},
                                {"comments", entry.comments},
-                               {"mean", entry.mean}});
+                               {"mean", entry.mean},
+                               {"publicationStatus", entry.publicationStatus},
+                               {"startedReading", entry.startedReading},
+                               {"finishedReading", entry.finishedReading},
+                               {"updatedAt", entry.updatedAt}});
   }
   QSaveFile file(path);
   if (file.open(QIODevice::WriteOnly)) {
@@ -301,67 +367,45 @@ void MangaWidget::saveCache() const {
 
 void MangaWidget::setBusy(bool busy, const QString& message) {
   busy_ = busy;
-  refreshButton_->setEnabled(!busy);
-  searchButton_->setEnabled(!busy);
-  editButton_->setEnabled(!busy);
-  addButton_->setEnabled(!busy);
-  chapterButton_->setEnabled(!busy && !taiga::accounts.myanimelistAccessToken().empty());
-  if (!message.isEmpty()) {
-    messageLabel_->setText(message);
-  }
+  refreshAction_->setEnabled(!busy);
+  chapterAction_->setEnabled(!busy && !taiga::accounts.myanimelistAccessToken().empty());
+  if (!message.isEmpty()) showStatus(message, busy);
 }
 
 void MangaWidget::refresh() {
-  if (busy_) return;
-  if (taiga::accounts.myanimelistUsername().empty()) {
-    messageLabel_->setText(tr("Connect a MyAnimeList account in Settings to load manga."));
-    return;
-  }
+  if (busy_ || taiga::accounts.myanimelistUsername().empty()) return;
   setBusy(true, tr("Loading manga from MyAnimeList..."));
   sync::myanimelist::Service::instance()->fetchMangaList();
 }
 
 void MangaWidget::search() {
-  if (busy_) return;
-  const auto query = searchBox_->text().trimmed();
-  if (query.isEmpty()) return;
-  setBusy(true, tr("Searching MyAnimeList..."));
+  const auto query = mainWindow()->searchBox()->text().trimmed();
+  if (busy_ || query.isEmpty()) return;
+  setBusy(true, tr("Searching MyAnimeList for \"%1\"...").arg(query));
   sync::myanimelist::Service::instance()->searchManga(query);
 }
 
-void MangaWidget::populate(QTableWidget* table, const QList<manga::Entry>& entries) {
-  const int previousId = selectedId(table);
-  table->setSortingEnabled(false);
-  table->setRowCount(entries.size());
-  for (int row = 0; row < entries.size(); ++row) {
-    const auto& entry = entries.at(row);
-    auto* title = new QTableWidgetItem(entry.title);
-    title->setData(Qt::UserRole, entry.id);
-    table->setItem(row, 0, title);
-    table->setItem(row, 1, numberItem(entry.chaptersRead,
-                                      u"%1 / %2"_s.arg(entry.chaptersRead).arg(
-                                          entry.chapters ? QString::number(entry.chapters) : u"?"_s)));
-    table->setItem(row, 2, numberItem(entry.volumesRead,
-                                      u"%1 / %2"_s.arg(entry.volumesRead).arg(
-                                          entry.volumes ? QString::number(entry.volumes) : u"?"_s)));
-    table->setItem(row, 3, new QTableWidgetItem(statusLabel(entry.status)));
-    table->setItem(row, 4, numberItem(entry.score, entry.score ? QString::number(entry.score) : QString{}));
-    table->setItem(row, 5, new QTableWidgetItem(entry.type));
-    table->setItem(row, 6, numberItem(qRound(entry.mean * 100),
-                                      entry.mean > 0 ? QString::number(entry.mean, 'f', 2) : QString{}));
-    if (entry.id == previousId) table->selectRow(row);
-  }
-  table->setSortingEnabled(true);
-}
+void MangaWidget::populate() {
+  const int previousId = selectedId();
 
-void MangaWidget::filterList() {
-  const auto text = filterBox_->text();
-  for (int row = 0; row < listTable_->rowCount(); ++row) {
-    const int id = listTable_->item(row, 0)->data(Qt::UserRole).toInt();
-    const auto entry = library_.value(id);
-    listTable_->setRowHidden(row, !entry.title.contains(text, Qt::CaseInsensitive) ||
-                                      (!currentStatus_.isEmpty() && entry.status != currentStatus_));
+  // Sorting once at the end instead of on every inserted row.
+  view_->setUpdatesEnabled(false);
+  proxyModel_->setDynamicSortFilter(false);
+  model_->removeRows(0, model_->rowCount());
+  for (const auto& entry : showingResults_ ? results_ : library_) {
+    if (!showingResults_ && !currentStatus_.isEmpty() && entry.status != currentStatus_)
+      continue;
+    model_->appendRow(makeRow(entry));
   }
+  proxyModel_->setDynamicSortFilter(true);
+  view_->setUpdatesEnabled(true);
+
+  proxyModel_->setFilterFixedString(showingResults_ ? QString{}
+                                                    : mainWindow()->searchBox()->text());
+  view_->emptyText = taiga::accounts.myanimelistUsername().empty()
+                         ? tr("Connect a MyAnimeList account in Settings to see your manga.")
+                         : tr("No manga found.");
+  selectId(previousId);
 }
 
 void MangaWidget::updateCounts() {
@@ -370,20 +414,41 @@ void MangaWidget::updateCounts() {
   mainWindow()->navigation()->updateMangaCounts(counts);
 }
 
-int MangaWidget::selectedId(QTableWidget* table) const {
-  const int row = table->currentRow();
-  return row >= 0 && table->item(row, 0) ? table->item(row, 0)->data(Qt::UserRole).toInt() : 0;
+void MangaWidget::selectId(int id) {
+  if (!id) return;
+  const auto matches = proxyModel_->match(proxyModel_->index(0, kTitle), kIdRole, id, 1,
+                                          Qt::MatchExactly);
+  if (!matches.isEmpty()) view_->setCurrentIndex(matches.first());
 }
 
-void MangaWidget::editSelected(QTableWidget* table) {
+int MangaWidget::selectedId() const {
+  const auto index = view_->currentIndex();
+  return index.isValid() ? index.siblingAtColumn(kTitle).data(kIdRole).toInt() : 0;
+}
+
+const manga::Entry* MangaWidget::selectedEntry() const {
+  const int id = selectedId();
+  if (const auto it = library_.constFind(id); it != library_.cend()) return &*it;
+  if (const auto it = results_.constFind(id); it != results_.cend()) return &*it;
+  return nullptr;
+}
+
+void MangaWidget::addChapter() {
+  if (busy_ || taiga::accounts.myanimelistAccessToken().empty()) return;
+  const int id = selectedId();
+  if (!library_.contains(id)) return;
+  auto entry = library_.value(id);
+  if (entry.chapters > 0 && entry.chaptersRead >= entry.chapters) return;
+  const auto previous = entry;
+  ++entry.chaptersRead;
+  if (entry.status == "plan_to_read") entry.status = "reading";
+  setBusy(true, tr("Updating %1...").arg(entry.title));
+  sync::myanimelist::Service::instance()->updateMangaEntry(entry, previous);
+}
+
+void MangaWidget::editSelected() {
   if (busy_) return;
-  const int id = selectedId(table);
-  if (!id) return;
-  if (library_.contains(id)) {
-    editEntry(library_.value(id));
-  } else if (results_.contains(id)) {
-    editEntry(results_.value(id));
-  }
+  if (const auto* entry = selectedEntry()) editEntry(*entry);
 }
 
 void MangaWidget::editEntry(manga::Entry entry) {
@@ -396,14 +461,31 @@ void MangaWidget::editEntry(manga::Entry entry) {
     return;
   }
   if (dialog.removeRequested()) {
-    setBusy(true, tr("Removing manga..."));
+    setBusy(true, tr("Removing %1...").arg(entry.title));
     sync::myanimelist::Service::instance()->deleteMangaEntry(entry.id);
     return;
   }
   const auto edited = dialog.editedEntry();
   if (entry.onList && sameListFields(entry, edited)) return;
-  setBusy(true, tr("Saving manga to MyAnimeList..."));
+  setBusy(true, tr("Updating %1...").arg(entry.title));
   sync::myanimelist::Service::instance()->updateMangaEntry(edited, entry);
+}
+
+void MangaWidget::showContextMenu(const QPoint& pos) {
+  const auto* entry = selectedEntry();
+  if (!entry || !view_->indexAt(pos).isValid()) return;
+
+  QMenu menu(this);
+  menu.addAction(theme.getIcon("edit"), entry->onList ? tr("Edit...") : tr("Add to list..."),
+                 this, [this] { editSelected(); });
+  if (library_.contains(entry->id)) {
+    menu.addAction(chapterAction_);
+  }
+  menu.addSeparator();
+  menu.addAction(theme.getIcon("open_in_new"), tr("Open on MyAnimeList"), this, [id = entry->id] {
+    QDesktopServices::openUrl(QUrl{u"https://myanimelist.net/manga/%1"_s.arg(id)});
+  });
+  menu.exec(view_->viewport()->mapToGlobal(pos));
 }
 
 }  // namespace gui

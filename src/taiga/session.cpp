@@ -50,6 +50,10 @@ gui::ListViewMode Session::animeListViewMode() const {
       .value<gui::ListViewMode>();
 }
 
+QByteArray Session::headerState(const QString& view) const {
+  return QByteArray::fromBase64(value(u"%1.headerState"_s.arg(view), QByteArray{}).toByteArray());
+}
+
 QByteArray Session::mainWindowGeometry() const {
   return QByteArray::fromBase64(value("mainWindow.geometry", QByteArray{}).toByteArray());
 }
@@ -115,6 +119,10 @@ void Session::setAnimeListSortOrder(const Qt::SortOrder order) const {
 
 void Session::setAnimeListViewMode(const gui::ListViewMode mode) const {
   setValue("animeList.viewMode", static_cast<int>(mode));
+}
+
+void Session::setHeaderState(const QString& view, const QByteArray& state) const {
+  setValue(u"%1.headerState"_s.arg(view), state.toBase64().toStdString());
 }
 
 void Session::setMainWindowGeometry(const QByteArray& geometry) const {

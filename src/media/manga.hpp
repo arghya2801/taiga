@@ -3,7 +3,15 @@
 #include <QString>
 #include <QStringList>
 
+#include <utility>
+
 namespace manga {
+
+// MyAnimeList status values and their display labels, in list order.
+constexpr std::pair<const char*, const char*> kStatuses[] = {
+    {"reading", "Reading"}, {"completed", "Completed"},        {"on_hold", "On hold"},
+    {"dropped", "Dropped"}, {"plan_to_read", "Plan to read"},
+};
 
 struct Entry {
   int id = 0;
@@ -20,6 +28,9 @@ struct Entry {
   QStringList genres;
   QStringList tags;
   QString comments;
+  QString startedReading;  // list dates, "YYYY-MM-DD"
+  QString finishedReading;
+  QString updatedAt;  // ISO 8601
   int chapters = 0;
   int volumes = 0;
   int chaptersRead = 0;

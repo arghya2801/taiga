@@ -5,6 +5,8 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 add_executable(taiga)
 
 target_sources(taiga PRIVATE
+	base/atf.cpp
+	base/atf.hpp
 	base/chrono.cpp
 	base/chrono.hpp
 	base/file.cpp
@@ -42,6 +44,8 @@ target_sources(taiga PRIVATE
 	media/anime_list.hpp
 	media/anime_season.cpp
 	media/anime_season.hpp
+	media/anime_stats.cpp
+	media/anime_stats.hpp
 	media/anime_settings.hpp
 	media/anime_utils.cpp
 	media/anime_utils.hpp
@@ -101,6 +105,8 @@ target_sources(taiga PRIVATE
 	taiga/session.cpp
 	taiga/session.hpp
 	taiga/settings.cpp
+	taiga/sharing.cpp
+	taiga/sharing.hpp
 	taiga/settings.hpp
 	taiga/version.cpp
 	taiga/version.hpp
@@ -125,6 +131,10 @@ target_sources(taiga PRIVATE
 	track/recognition_relations.hpp
 	track/recognition_validate.cpp
 	track/recognition_validate.hpp
+	track/feed.cpp
+	track/feed.hpp
+	track/feed_filter.cpp
+	track/feed_filter.hpp
 	track/scanner.cpp
 	track/scanner.hpp
 	track/update_decision.cpp
@@ -157,6 +167,14 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
 	set_target_properties(taiga PROPERTIES OUTPUT_NAME Taiga)
 	set_target_properties(taiga PROPERTIES WIN32_EXECUTABLE ON)
 endif()
+
+# Self-checks for pure logic; run `taiga-checks` after building.
+add_executable(taiga-checks
+	checks.cpp
+	base/atf.cpp
+	track/feed_filter.cpp
+)
+target_link_libraries(taiga-checks PRIVATE Qt6::Core)
 
 add_subdirectory(gui)
 add_subdirectory(resources)

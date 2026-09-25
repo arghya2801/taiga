@@ -19,12 +19,17 @@
 #pragma once
 
 #include <QAbstractListModel>
+#include <QHash>
 #include <QList>
+#include <QSet>
 
 #include "media/anime.hpp"
 #include "media/anime_list.hpp"
 
 namespace gui {
+
+// The next episode is in the library folders, and highlighting is on.
+bool hasNewEpisode(const Anime& anime, const ListEntry* entry);
 
 enum class AnimeListItemDataRole {
   Anime = Qt::UserRole,
@@ -50,6 +55,7 @@ public:
     COLUMN_COMPLETED,
     COLUMN_LAST_UPDATED,
     COLUMN_NOTES,
+    COLUMN_AIRING,  // last so saved sort columns keep their numbers; shown first
     NUM_COLUMNS
   };
 
@@ -69,7 +75,12 @@ public:
   void addIds(const QList<int>& ids);
 
 private:
+  void flushPending();
+  void rebuildRows();
+
   QList<int> m_ids;
+  QHash<int, int> m_rows;  // id -> row
+  QSet<int> m_pending;
 
 private slots:
   void refreshRow(int id);

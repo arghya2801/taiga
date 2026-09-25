@@ -18,6 +18,8 @@
 
 #pragma once
 
+#include <QHash>
+#include <QMutex>
 #include <QNetworkProxy>
 #include <chrono>
 #include <optional>
@@ -78,8 +80,26 @@ public:
   void setUpdatePauseWhenUnfocused(const bool enabled) const;
   void setUpdateTrigger(const track::UpdateTrigger trigger) const;
 
+  // Untyped access for the simple options in `taiga/options.hpp`. Cached, because some are read
+  // while painting and sorting lists, and each `QSettings` read is comparatively slow.
+  // Locked, as recognition reads options from the library scan thread.
+  QVariant option(QAnyStringView key, const QVariant& defaultValue) const {
+    const auto name = key.toString();
+    const QMutexLocker lock{&optionMutex_};
+    if (const auto it = optionCache_.constFind(name); it != optionCache_.cend()) return *it;
+    return *optionCache_.insert(name, value(key, defaultValue));
+  }
+  void setOption(QAnyStringView key, const QVariant& value) const {
+    const QMutexLocker lock{&optionMutex_};
+    optionCache_.insert(key.toString(), value);
+    setValue(key, value);
+  }
+
 private:
   QString fileName() const override;
+
+  mutable QHash<QString, QVariant> optionCache_;
+  mutable QMutex optionMutex_;
 
   mutable std::optional<anime::TitleLanguage> titleLanguageCache_;
 };

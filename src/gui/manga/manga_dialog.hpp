@@ -15,6 +15,8 @@ class QTextBrowser;
 
 namespace gui {
 
+class PosterWidget;
+
 class MangaDialog final : public QDialog {
 public:
   explicit MangaDialog(QWidget* parent, manga::Entry entry);
@@ -29,10 +31,9 @@ private:
   manga::Entry entry_;
   bool removeRequested_ = false;
   QString loadedCoverUrl_;
-  QLabel* coverLabel_ = nullptr;
+  PosterWidget* poster_ = nullptr;
   QLabel* titleLabel_ = nullptr;
   QLabel* alternativeTitlesLabel_ = nullptr;
-  QLabel* detailsLoadLabel_ = nullptr;
   QFormLayout* infoLayout_ = nullptr;
   QTextBrowser* synopsis_ = nullptr;
   QComboBox* statusBox_ = nullptr;
