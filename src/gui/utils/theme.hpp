@@ -41,8 +41,24 @@ public:
   static QColor successColor();
   static QColor warningColor();
 
+  // Design tokens for custom painting. The palette and stylesheets use the same values.
+  enum class Color {
+    Surface,    // lists and page content
+    Raised,     // cards, headers, hover
+    Sunken,     // progress track, poster placeholder
+    Line,       // separators
+    Text,
+    Muted,      // secondary text
+    Faint,      // placeholders, empty values
+    Progress,   // watched episodes; the one strong color
+    Available,  // episodes in library folders
+    Accent,     // selection, from Windows when available
+  };
+  QColor color(Color token) const;
+
 private:
   QString readStylesheet(const QString& name) const;
+  void applyPalette() const;
 
   QHash<QString, QIcon> m_icons;
 };

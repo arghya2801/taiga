@@ -41,6 +41,9 @@ void paintEmptyListText(QAbstractScrollArea* widget, const QString& text);
 
 void paintProgressBar(QPainter* painter, const QStyleOption& option, const anime::Details* anime,
                       const anime::list::Entry* entry);
+// `aired` and `animeId` add the aired-episodes shade and library ticks; 0 skips them.
+void paintProgressBar(QPainter* painter, const QStyleOption& option, int done, int total,
+                      int aired = 0, int animeId = 0);
 
 // Draws `pixmap` rotated by `angle` degrees around `center`.
 void paintSpinner(QPainter* painter, const QPixmap& pixmap, const QPointF& center, qreal angle);

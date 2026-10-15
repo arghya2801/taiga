@@ -19,6 +19,7 @@
 #pragma once
 
 #include <QTreeWidget>
+#include <QHash>
 
 namespace anime::list {
 enum class Status;
@@ -39,6 +40,7 @@ public:
 
   QTreeWidgetItem* findItemByPage(MainWindowPage page) const;
   QTreeWidgetItem* findListStatusItem(anime::list::Status status) const;
+  void updateMangaCounts(const QHash<QString, int>& counts);
 
 public slots:
   void refresh();
@@ -46,6 +48,7 @@ public slots:
 signals:
   void currentPageChanged(MainWindowPage page);
   void currentListStatusChanged(anime::list::Status status);
+  void currentMangaStatusChanged(const QString& status);
 
 protected:
   void mouseMoveEvent(QMouseEvent* event) override;
@@ -55,6 +58,8 @@ private:
   QTreeWidgetItem* addChildItem(QTreeWidgetItem* parent, const QString& text);
   void addSeparator();
   void setItemData(QTreeWidgetItem* item, NavigationItemDataRole role, const QVariant& value);
+
+  QHash<QString, int> m_mangaStatusCounts;
 };
 
 }  // namespace gui

@@ -19,10 +19,14 @@
 #include "scanner.hpp"
 
 #include <QDirIterator>
+#include <QtConcurrentRun>
 #include <algorithm>
 #include <optional>
 #include <ranges>
+#include <vector>
 
+#include "media/anime.hpp"
+#include "media/anime_db.hpp"
 #include "taiga/settings.hpp"
 #include "track/episode.hpp"
 #include "track/recognition.hpp"
@@ -78,6 +82,66 @@ std::optional<QString> findFolder(const QString& path, const int anime_id) {
   }
 
   return std::nullopt;
+}
+
+void AvailableEpisodes::scan() {
+  if (m_scanning) return;
+  m_scanning = true;
+
+  // Walking and parsing happen off the UI thread. `identify` reads the anime database, which
+  // isn't thread-safe, so it runs on the UI thread once the walk is done.
+  QtConcurrent::run([folders = taiga::settings.libraryFolders()] {
+    std::vector<Episode> episodes;
+    for (const auto& folder : folders) {
+      QDirIterator it{QString::fromStdString(folder), QDir::Files, QDirIterator::Subdirectories};
+      while (it.hasNext()) {
+        auto episode = recognition::parseFileInfo(it.nextFileInfo());
+        if (recognition::isVideoFile(episode)) episodes.push_back(std::move(episode));
+      }
+    }
+    return episodes;
+  }).then(this, [this](std::vector<Episode> episodes) {
+    m_episodes.clear();
+    int count = 0;
+    for (auto& episode : episodes) {
+      const int id = recognition::identify(episode);
+      if (id == anime::kUnknownId) continue;
+      auto range = episode.episodeNumberRange();
+      if (!range) {
+        // Movies and other single-episode anime usually have no number.
+        const auto item = anime::db.item(id);
+        if (!item || item->episode_count != 1) continue;
+        range = std::pair{1, 1};
+      }
+      for (int number = range->first; number <= range->second; ++number) {
+        m_episodes[id].insert(number);
+        ++count;
+      }
+    }
+    m_scanning = false;
+    emit scanFinished(count);
+  });
+}
+
+bool AvailableEpisodes::isScanning() const {
+  return m_scanning;
+}
+
+int AvailableEpisodes::count(const int animeId) const {
+  return m_episodes.value(animeId).size();
+}
+
+int AvailableEpisodes::last(const int animeId) const {
+  const auto episodes = m_episodes.value(animeId);
+  return episodes.isEmpty() ? 0 : *std::ranges::max_element(episodes);
+}
+
+bool AvailableEpisodes::contains(const int animeId, const int episode) const {
+  return m_episodes.value(animeId).contains(episode);
+}
+
+bool AvailableEpisodes::hasNext(const int animeId, const int watched) const {
+  return contains(animeId, watched + 1);
 }
 
 bool isInsideLibraryFolders(const QString& path) {

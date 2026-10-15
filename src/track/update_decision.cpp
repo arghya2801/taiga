@@ -19,6 +19,7 @@
 #include "update_decision.hpp"
 
 #include "media/anime_list_utils.hpp"
+#include "taiga/options.hpp"
 
 namespace track {
 
@@ -60,6 +61,8 @@ UpdateDecision decideUpdate(const Episode& episode, const anime::Details& item,
   if (lowestNumber > watchedEpisodes + 1) {
     return {Action::Confirm, Reason::SkipsAhead};
   }
+
+  if (taiga::opt::askBeforeUpdating.get()) return {Action::Confirm, Reason::AskEnabled};
 
   return {Action::Allow, Reason::None};
 }

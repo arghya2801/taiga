@@ -35,6 +35,11 @@ public:
   ~NetworkAccessManager() = default;
 
   static QHttpHeaders commonHeaders();
+#ifdef TAIGA_TESTING
+protected:
+  QNetworkReply* createRequest(Operation operation, const QNetworkRequest& request,
+                               QIODevice* outgoingData = nullptr) override;
+#endif
 };
 
 inline NetworkAccessManager* network() {

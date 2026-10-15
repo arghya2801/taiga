@@ -22,6 +22,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QSqlError>
+#include <QSqlIndex>
 #include <QSqlQuery>
 #include <QSqlRecord>
 #include <QSqlResult>
@@ -68,8 +69,17 @@ void Database::init() {
   db_ = QSqlDatabase::addDatabase("QSQLITE");
   db_.setDatabaseName(fileName());
 
-  if (!QFile::exists(fileName())) {
-    createTables();
+  const bool exists = QFile::exists(fileName());
+
+  // Kept open for the app's lifetime; reopening per write cost a file open and an fsync each time.
+  if (db_.open()) {
+    QSqlQuery q{db_};
+    q.exec("PRAGMA journal_mode=WAL");
+    q.exec("PRAGMA synchronous=NORMAL");
+  }
+  createTables();
+
+  if (!exists) {
     migrateItemsFromV1();
     migrateListEntriesFromV1();
     migrateSettingsFromV1();
@@ -110,11 +120,10 @@ void Database::updateItem(const Anime& item) {
 
 void Database::updateItems(const QList<Anime>& items) {
   if (items.isEmpty()) return;
-  if (!db_.open()) return;
+  if (!db_.isOpen()) return;
 
   QSqlQuery q{db_};
   if (!q.prepare(sql("insertAnime"))) {
-    db_.close();
     return;
   }
 
@@ -125,8 +134,6 @@ void Database::updateItems(const QList<Anime>& items) {
   }
   db_.commit();
 
-  db_.close();
-
   for (const auto& item : items) {
     items_[item.id] = item;
   }
@@ -135,28 +142,31 @@ void Database::updateItems(const QList<Anime>& items) {
   }
 }
 
-void Database::updateEntry(const ListEntry& entry) {
-  updateEntries({entry});
+bool Database::updateEntry(const ListEntry& entry) {
+  return updateEntries({entry});
 }
 
-void Database::updateEntries(const QList<ListEntry>& entries) {
-  if (entries.isEmpty()) return;
-  if (!db_.open()) return;
+bool Database::updateEntries(const QList<ListEntry>& entries) {
+  if (entries.isEmpty()) return true;
+  if (!db_.isOpen()) return false;
 
   QSqlQuery q{db_};
   if (!q.prepare(sql("insertAnimeList"))) {
-    db_.close();
-    return;
+    return false;
   }
 
-  db_.transaction();
+  if (!db_.transaction()) return false;
   for (const auto& entry : entries) {
     bindEntryToQuery(entry, q);
-    q.exec();
+    if (!q.exec()) {
+      db_.rollback();
+      return false;
+    }
   }
-  db_.commit();
-
-  db_.close();
+  if (!db_.commit()) {
+    db_.rollback();
+    return false;
+  }
 
   for (const auto& entry : entries) {
     entries_[entry.anime_id] = entry;
@@ -164,17 +174,16 @@ void Database::updateEntries(const QList<ListEntry>& entries) {
   for (const auto& entry : entries) {
     emit entryUpdated(entry.anime_id);
   }
+  return true;
 }
 
 void Database::updateSettings(const Settings& settings) {
-  if (!db_.open()) return;
+  if (!db_.isOpen()) return;
 
   QSqlQuery q{db_};
   q.prepare(sql("insertAnimeSettings"));
   bindSettingsToQuery(settings, q);
   q.exec();
-
-  db_.close();
 
   settings_[settings.id] = settings;
 
@@ -185,14 +194,12 @@ void Database::deleteItem(const int id) {
   const auto* existing = item(id);
   const auto title = existing ? QString::fromStdString(preferredTitle(*existing)) : QString();
 
-  if (!db_.open()) return;
+  if (!db_.isOpen()) return;
 
   QSqlQuery q{db_};
   q.prepare("DELETE FROM anime WHERE id = :id");
   q.bindValue(":id", id);
   q.exec();
-
-  db_.close();
 
   items_.remove(id);
 
@@ -200,14 +207,12 @@ void Database::deleteItem(const int id) {
 }
 
 void Database::deleteEntry(const int animeId) {
-  if (!db_.open()) return;
+  if (!db_.isOpen()) return;
 
   QSqlQuery q{db_};
   q.prepare("DELETE FROM anime_list WHERE media_id = :media_id");
   q.bindValue(":media_id", animeId);
   q.exec();
-
-  db_.close();
 
   entries_.remove(animeId);
 
@@ -223,7 +228,7 @@ QString Database::sql(const QString& name) const {
 }
 
 void Database::createTables() {
-  if (!db_.open()) return;
+  if (!db_.isOpen()) return;
 
   const auto tables = db_.tables();
 
@@ -243,7 +248,18 @@ void Database::createTables() {
     q.exec(sql("createAnime"));
   }
 
-  if (!tables.contains("anime_list")) {
+  // Older databases keyed list entries on `id`, which MyAnimeList doesn't provide, so every
+  // entry overwrote the previous one. Rebuild the table keyed on `media_id`, keeping its rows
+  // (they include unsynced edits and pending deletes).
+  if (tables.contains("anime_list") && db_.primaryIndex("anime_list").fieldName(0) != "media_id") {
+    QSqlQuery q{db_};
+    q.exec("ALTER TABLE anime_list RENAME TO anime_list_old");
+    q.exec(sql("createAnimeList"));
+    q.exec("INSERT OR REPLACE INTO anime_list SELECT * FROM anime_list_old");
+    q.exec("DROP TABLE anime_list_old");
+  }
+
+  if (!db_.tables().contains("anime_list")) {
     QSqlQuery q{db_};
     q.exec(sql("createAnimeList"));
   }
@@ -254,11 +270,10 @@ void Database::createTables() {
   }
 
   db_.commit();
-  db_.close();
 }
 
 QString Database::currentVersion() {
-  if (!db_.open()) return {};
+  if (!db_.isOpen()) return {};
 
   QSqlQuery q{db_};
 
@@ -268,13 +283,11 @@ QString Database::currentVersion() {
   q.exec();
   const QString version = q.value(0).toString();
 
-  db_.close();
-
   return version;
 }
 
 void Database::readItems() {
-  if (!db_.open()) return;
+  if (!db_.isOpen()) return;
 
   QSqlQuery q{db_};
   if (!q.exec("SELECT * FROM anime")) return;
@@ -283,12 +296,10 @@ void Database::readItems() {
     const int id = q.value("id").toInt();
     items_[id] = itemFromQuery(q);
   }
-
-  db_.close();
 }
 
 void Database::readEntries() {
-  if (!db_.open()) return;
+  if (!db_.isOpen()) return;
 
   QSqlQuery q{db_};
   if (!q.exec("SELECT * FROM anime_list")) return;
@@ -297,17 +308,14 @@ void Database::readEntries() {
     const int id = q.value("media_id").toInt();
     entries_[id] = entryFromQuery(q);
   }
-
-  db_.close();
 }
 
 void Database::readSettings() {
-  if (!db_.open()) return;
+  if (!db_.isOpen()) return;
 
   QSqlQuery q{db_};
 
   if (!q.exec("SELECT * FROM anime_settings")) {
-    db_.close();
     return;
   }
 
@@ -315,8 +323,6 @@ void Database::readSettings() {
     const int id = q.value("id").toInt();
     settings_[id] = settingsFromQuery(q);
   }
-
-  db_.close();
 }
 
 void Database::bindItemToQuery(const Anime& item, QSqlQuery& q) const {
@@ -430,27 +436,27 @@ Settings Database::settingsFromQuery(const QSqlQuery& q) const {
 }
 
 void Database::migrateItemsFromV1() {
-  if (!db_.open()) return;
+  if (!db_.isOpen()) return;
 
   QSqlQuery q{db_};
   if (!q.prepare(sql("insertAnime"))) return;
 
   const auto path = std::format("{}/v1/db/anime.xml", taiga::get_data_path());
+  if (!QFile::exists(QString::fromStdString(path))) return;
 
   db_.transaction();
 
-  for (const auto& item : compat::v1::readAnimeDatabase(path)) {
+  for (const auto& item : compat::v1::readAnimeDatabase(path, taiga::settings.service())) {
     items_[item.id] = item;
     bindItemToQuery(item, q);
     q.exec();
   }
 
   db_.commit();
-  db_.close();
 }
 
 void Database::migrateListEntriesFromV1() {
-  if (!db_.open()) return;
+  if (!db_.isOpen()) return;
 
   QSqlQuery q{db_};
   if (!q.prepare(sql("insertAnimeList"))) return;
@@ -460,6 +466,7 @@ void Database::migrateListEntriesFromV1() {
     return std::format("{}/v1/user/{}@{}/anime.xml", taiga::get_data_path(),
                        taiga::accounts.serviceUsername(service), service);
   }();
+  if (!QFile::exists(QString::fromStdString(path))) return;
 
   db_.transaction();
 
@@ -471,16 +478,16 @@ void Database::migrateListEntriesFromV1() {
   }
 
   db_.commit();
-  db_.close();
 }
 
 void Database::migrateSettingsFromV1() {
-  if (!db_.open()) return;
+  if (!db_.isOpen()) return;
 
   QSqlQuery q{db_};
   if (!q.prepare(sql("insertAnimeSettings"))) return;
 
   const auto path = std::format("{}/v1/settings.xml", taiga::get_data_path());
+  if (!QFile::exists(QString::fromStdString(path))) return;
 
   db_.transaction();
 
@@ -492,7 +499,6 @@ void Database::migrateSettingsFromV1() {
   }
 
   db_.commit();
-  db_.close();
 }
 
 }  // namespace anime

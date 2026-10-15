@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include <QHash>
 #include <QList>
 #include <QObject>
 
@@ -35,10 +36,12 @@ enum class MainWindowPage {
   Home,
   Search,
   List,
+  Manga,
   History,
   Library,
   Torrents,
   Profile,
+  Stats,  // not in the .ui file; `MainWindow` adds its page
 };
 
 class NavigationController final : public QObject {
@@ -67,6 +70,7 @@ private:
 
   QList<MainWindowPage> m_pageHistory;
   int m_pageHistoryIndex = -1;
+  QHash<MainWindowPage, QString> searchTexts_;
 };
 
 }  // namespace gui

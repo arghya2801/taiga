@@ -18,10 +18,14 @@
 
 #pragma once
 
+#include <QHash>
 #include <QSortFilterProxyModel>
 #include <optional>
 
+#include "media/anime_query.hpp"
+
 namespace gui {
+enum class AnimeListGrouping { None, Status, Type };
 
 struct AnimeListStatusFilter {
   std::optional<int> status;
@@ -54,13 +58,25 @@ public:
   void setStatusFilter(std::optional<int> status);
   void setListStatusFilter(AnimeListStatusFilter filter);
   void setTextFilter(const QString& text);
+  void setGrouping(AnimeListGrouping grouping);
+  QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
 
 protected:
   bool filterAcceptsRow(int row, const QModelIndex& parent) const override;
   bool lessThan(const QModelIndex& lhs, const QModelIndex& rhs) const override;
 
 private:
+  bool columnLessThan(int column, const Anime* lhs_anime, const Anime* rhs_anime,
+                      const ListEntry* lhs_entry, const ListEntry* rhs_entry) const;
+  QString cachedTitle(const Anime& anime) const;
+  int groupKey(const QModelIndex& sourceIndex) const;
+  AnimeListGrouping grouping_ = AnimeListGrouping::None;
+  mutable QHash<int, QString> titles_;
+  mutable anime::TitleLanguage titleLanguage_ = anime::TitleLanguage::Romaji;
+
+private:
   AnimeListProxyModelFilter m_filter;
+  anime::Query m_query;
 };
 
 }  // namespace gui

@@ -26,6 +26,9 @@
 #include <QTranslator>
 #include <chrono>
 #include <format>
+#ifdef TAIGA_TESTING
+#include <cstdio>
+#endif
 
 #include "base/log.hpp"
 #include "base/string.hpp"
@@ -34,8 +37,10 @@
 #include "gui/utils/theme.hpp"
 #include "media/anime_db.hpp"
 #include "media/anime_history.hpp"
+#include "media/manga_library.hpp"
 #include "sync/queue.hpp"
 #include "taiga/config.h"
+#include "taiga/options.hpp"
 #include "taiga/path.hpp"
 #include "taiga/settings.hpp"
 #include "taiga/version.hpp"
@@ -44,7 +49,7 @@
 
 namespace taiga {
 
-Application::Application(int argc, char* argv[])
+Application::Application(int& argc, char* argv[])
     : QApplication(argc, argv), shared_memory_(TAIGA_APP_NAME) {
   setApplicationName("taiga");
   setApplicationDisplayName("Taiga");
@@ -59,8 +64,20 @@ Application::~Application() {
   }
 }
 
+#ifdef TAIGA_TESTING
+void Application::initWindowForChecks() {
+  setWindowIcon(gui::theme.getIcon("taiga", "png"));
+  window_ = new gui::MainWindow();
+  window_->init();
+}
+#endif
+
 int Application::run() {
-  parseCommandLine();
+#ifdef TAIGA_TESTING
+  const bool startupProbe = property("taiga.testStartupProbe").toBool();
+  if (!startupProbe)
+#endif
+    parseCommandLine();
 
   initLogger();
 
@@ -72,19 +89,26 @@ int Application::run() {
     qDebug() << "Options:" << parser_.optionNames().join(", ");
   }
 
-  if (hasPreviousInstance()) {
-    activatePreviousInstance();
-    qDebug() << "Another instance of Taiga is running.";
-    return 0;
-  }
+#ifdef TAIGA_TESTING
+  if (!startupProbe) {
+#endif
+    if (hasPreviousInstance()) {
+      activatePreviousInstance();
+      qDebug() << "Another instance of Taiga is running.";
+      return 0;
+    }
 
-  connect(&local_server_, &QLocalServer::newConnection, this, &Application::onNewConnection);
-  local_server_.listen(TAIGA_APP_NAME);
+    connect(&local_server_, &QLocalServer::newConnection, this, &Application::onNewConnection);
+    local_server_.listen(TAIGA_APP_NAME);
+#ifdef TAIGA_TESTING
+  }
+#endif
 
   taiga::settings.init();
   anime::db.init();
   anime::history.init();
   sync::queue.init();
+  manga::library.init();
   track::media::detection()->init();
   track::updateSession()->init();
   gui::imageProvider.init();
@@ -99,6 +123,29 @@ int Application::run() {
 
   window_ = new gui::MainWindow();
   window_->init();
+
+#ifdef TAIGA_TESTING
+  if (startupProbe) {
+    window_->setAttribute(Qt::WA_DontShowOnScreen);
+    window_->resize(1180, 850);
+    window_->show();
+    QTimer::singleShot(0, window_, [this] {
+      window_->grab();
+      std::printf("FIRST_FRAME\n");
+      std::fflush(stdout);
+      QCoreApplication::quit();
+    });
+    return QApplication::exec();
+  }
+#endif
+
+  if (taiga::opt::startMinimized.get()) {
+    // With a tray option on, the tray icon is the only thing shown.
+    if (!taiga::opt::minimizeToTray.get() && !taiga::opt::closeToTray.get()) {
+      window_->showMinimized();
+    }
+    return QApplication::exec();
+  }
 
 #ifdef Q_OS_WINDOWS
   // Delay showing the window to avoid a white flash.

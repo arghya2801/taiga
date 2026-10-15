@@ -20,6 +20,7 @@
 
 #include <QClipboard>
 #include <QDesktopServices>
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QInputDialog>
 #include <QItemSelectionModel>
@@ -209,8 +210,15 @@ void MediaMenu::matchNowPlaying() const {
   track::media::detection()->setCurrentEpisodeAnimeId(item.id);
 }
 
-void MediaMenu::openFolder() const {
-  const auto& item = m_items.front();
+void openAnimeFolder(const Anime& item) {
+  // A folder set in the anime's settings wins over searching the library.
+  if (const auto settings = anime::db.settings(item.id); settings && !settings->folder.empty()) {
+    const auto folder = QString::fromStdString(settings->folder);
+    if (QFileInfo::exists(folder)) {
+      QDesktopServices::openUrl(QUrl::fromLocalFile(folder));
+      return;
+    }
+  }
 
   const auto libraryFolders = taiga::settings.libraryFolders();
 
@@ -223,8 +231,13 @@ void MediaMenu::openFolder() const {
     }
   }
 
-  QMessageBox::information(nullptr, tr("Open Folder"),
-                           tr("Could not find folder for %1.").arg(anime::preferredTitle(item)));
+  QMessageBox::information(
+      nullptr, MediaMenu::tr("Open Folder"),
+      MediaMenu::tr("Could not find folder for %1.").arg(anime::preferredTitle(item)));
+}
+
+void MediaMenu::openFolder() const {
+  openAnimeFolder(m_items.front());
 }
 
 void MediaMenu::playEpisode(int number) const {
@@ -272,13 +285,16 @@ void MediaMenu::refresh() const {
 void MediaMenu::removeFromList() const {
   QList<QString> titles;
   for (const auto& item : m_items) {
-    titles.push_back(u"<li>%1</li>"_s.arg(anime::preferredTitle(item)));
+    if (anime::list::isInList(getEntry(item.id)))
+      titles.push_back(u"<li>%1</li>"_s.arg(
+          QString::fromStdString(anime::preferredTitle(item)).toHtmlEscaped()));
   }
+  if (titles.isEmpty()) return;
 
   if (confirm(parentWidget(), tr("Do you want to remove selected items from your list?"),
               u"<ul>%1</ul>"_s.arg(titles.join("")), tr("Remove"))) {
     for (const auto& item : m_items) {
-      anime::list::remove(item.id);
+      if (anime::list::isInList(getEntry(item.id))) anime::list::remove(item.id);
     }
   }
 }
@@ -427,9 +443,7 @@ void MediaMenu::startNewRewatch() const {
 }
 
 void MediaMenu::torrents() const {
-  const auto& item = m_items.front();
-  mainWindow()->navigateTo(MainWindowPage::Torrents);
-  mainWindow()->searchBox()->setText(QString::fromStdString(anime::preferredTitle(item)));
+  mainWindow()->searchTorrents(QString::fromStdString(anime::preferredTitle(m_items.front())));
 }
 
 void MediaMenu::viewDetails() const {
@@ -449,7 +463,7 @@ void MediaMenu::edit() const {
 void MediaMenu::addMediaItems() {
   if (!isBatch()) {
     // View details
-    addAction(theme.getIcon("info"), tr("Details"), tr("Enter"), this, &MediaMenu::viewDetails);
+    addAction(theme.getIcon("info"), tr("Details"), this, &MediaMenu::viewDetails);
 
     if (m_context != AnimeListContext::Search) {
       // Search
@@ -648,8 +662,7 @@ void MediaMenu::addTorrentsItems() {
   if (isBatch()) return;
 
   // Torrents
-  addAction(theme.getIcon("rss_feed"), tr("Torrents"), this, &MediaMenu::torrents)
-      ->setDisabled(true);  // placeholder
+  addAction(theme.getIcon("rss_feed"), tr("Search for torrents"), this, &MediaMenu::torrents);
 }
 
 void MediaMenu::addMetaItems() {

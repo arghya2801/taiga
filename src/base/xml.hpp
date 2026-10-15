@@ -19,6 +19,7 @@
 #pragma once
 
 #include <QFile>
+#include <QSaveFile>
 #include <QString>
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>
@@ -39,13 +40,14 @@ private:
 
 class XmlFileWriter : public QXmlStreamWriter {
 public:
-  const QFile& file() const;
+  const QSaveFile& file() const;
 
   bool open(const QString& name);
+  bool commit();
   void writeNumberElement(QAnyStringView name, int number);
 
 private:
-  QFile file_;
+  QSaveFile file_;
 };
 
 }  // namespace base

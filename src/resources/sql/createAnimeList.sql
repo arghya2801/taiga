@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS anime_list(
-  id INTEGER PRIMARY KEY,
-  media_id INTEGER NOT NULL,
+  id INTEGER,
+  media_id INTEGER PRIMARY KEY,
   progress INTEGER,
   date_start TEXT,
   date_end TEXT,

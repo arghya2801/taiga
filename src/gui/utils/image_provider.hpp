@@ -37,22 +37,38 @@ public:
 
   void init();
 
-  void fetchPoster(const int id, const bool revalidate = false);
+  void fetchPoster(const int id);
   QPixmap loadPoster(const int id);
-  void reloadPoster(const int id);
+  QPixmap loadCover(const int mangaId, const QString& url);
+
+  qint64 cacheSize() const;
+  void refreshCacheSize();
+  void clearCache();
 
 signals:
   void posterChanged(const int id);
+  void coverChanged(const int mangaId);
+  void cacheSizeChanged(qint64 bytes);
 
 private:
-  QString fileName(const int id) const;
+  enum class Kind { Anime, Manga };
+
+  QPixmap load(const Kind kind, const int id, const QString& url);
+  void fetch(const Kind kind, const int id, const QString& url, const bool revalidate);
+  void emitChanged(const Kind kind, const int id);
+
+  QString cacheKey(const Kind kind, const int id) const;
+  QString fileName(const Kind kind, const int id) const;
   bool isStale(const int id) const;
-  bool canRetry(const int id) const;
-  void retryAfter(const int id);
+  bool canRetry(const QString& key) const;
+  void retryAfter(const QString& key);
 
   QRestAccessManager* m_manager = nullptr;
-  QSet<int> m_loading;
-  QMap<int, QDateTime> m_retryAfter;
+  QSet<QString> m_loading;
+  QMap<QString, QDateTime> m_retryAfter;
+  qint64 m_cacheSize = -1;
+  bool m_scanningCache = false;
+  quint64 m_cacheGeneration = 0;
 };
 
 inline ImageProvider imageProvider;

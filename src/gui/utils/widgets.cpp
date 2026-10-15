@@ -19,10 +19,58 @@
 #include "widgets.hpp"
 
 #include <QGuiApplication>
+#include <QHeaderView>
+#include <QMenu>
 #include <QMessageBox>
 #include <QScreen>
+#include <QTimer>
+
+#include "taiga/session.hpp"
 
 namespace gui {
+
+void setupHeaderMenu(QHeaderView* header, const QString& sessionKey) {
+  const auto defaults = header->saveState();
+  if (const auto state = taiga::session.headerState(sessionKey); !state.isEmpty()) {
+    header->restoreState(state);
+  }
+
+  // Resizing emits a signal per mouse move, so wait for it to settle before writing.
+  auto* saveTimer = new QTimer(header);
+  saveTimer->setSingleShot(true);
+  saveTimer->setInterval(500);
+  QObject::connect(saveTimer, &QTimer::timeout, header, [header, sessionKey] {
+    taiga::session.setHeaderState(sessionKey, header->saveState());
+  });
+  const auto scheduleSave = [saveTimer] { saveTimer->start(); };
+  QObject::connect(header, &QHeaderView::sectionResized, saveTimer, scheduleSave);
+  QObject::connect(header, &QHeaderView::sectionMoved, saveTimer, scheduleSave);
+
+  header->setContextMenuPolicy(Qt::CustomContextMenu);
+  QObject::connect(
+      header, &QWidget::customContextMenuRequested, header, [header, defaults](const QPoint& pos) {
+        QMenu menu(header);
+        const auto* model = header->model();
+        for (int i = 0; i < header->count(); ++i) {
+          auto text = model->headerData(i, Qt::Horizontal).toString();
+          if (text.isEmpty()) text = model->headerData(i, Qt::Horizontal, Qt::ToolTipRole).toString();
+          auto* action = menu.addAction(text);
+          action->setCheckable(true);
+          action->setChecked(!header->isSectionHidden(i));
+          action->setEnabled(i != 0);  // the first column (the title) always stays
+          QObject::connect(action, &QAction::toggled, header, [header, i](bool checked) {
+            header->setSectionHidden(i, !checked);
+            if (checked && header->sectionSize(i) < header->minimumSectionSize()) {
+              header->resizeSection(i, header->defaultSectionSize());
+            }
+          });
+        }
+        menu.addSeparator();
+        menu.addAction(QObject::tr("Reset headers"), header,
+                       [header, defaults] { header->restoreState(defaults); });
+        menu.exec(header->mapToGlobal(pos));
+      });
+}
 
 void centerWidgetToScreen(QWidget* widget) {
   if (!widget) return;

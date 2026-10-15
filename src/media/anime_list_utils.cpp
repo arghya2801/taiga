@@ -21,6 +21,7 @@
 #include <QDate>
 #include <ctime>
 
+#include "media/account_activity.hpp"
 #include "media/anime.hpp"
 #include "media/anime_db.hpp"
 #include "media/anime_history.hpp"
@@ -84,9 +85,11 @@ void save(Entry entry) {
 
   entry.pending_delete = false;
   entry.last_updated = std::time(nullptr);
-  db.updateEntry(entry);
+  if (!db.updateEntry(entry)) return;
+  stats::activity.record(stats::MediaKind::Anime, entry.anime_id, baseline.watched_episodes,
+                         entry.watched_episodes, baseline.score / 10.0, entry.score / 10.0);
 
-  if ((dirty & Field::Episode) && entry.watched_episodes > 0) {
+  if ((dirty & Field::Episode) && entry.watched_episodes > baseline.watched_episodes) {
     history.add(entry.anime_id, entry.watched_episodes, entry.last_updated);
   }
 
@@ -101,7 +104,7 @@ void remove(const int animeId) {
   updated.pending_delete = true;
   updated.last_updated = std::time(nullptr);
 
-  db.updateEntry(updated);
+  if (!db.updateEntry(updated)) return;
 
   sync::queue.pushDelete(animeId);
 }

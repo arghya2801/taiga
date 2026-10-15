@@ -88,7 +88,7 @@ QString listStatusFields() {
          "finish_date,"
          "is_rewatching,"
          "num_times_rewatched,"
-         "num_watched_episodes,"
+         "num_episodes_watched,"
          "score,"
          "start_date,"
          "status,"

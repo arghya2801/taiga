@@ -18,6 +18,9 @@
 
 #pragma once
 
+#include <QHash>
+#include <QObject>
+#include <QSet>
 #include <QString>
 #include <optional>
 
@@ -28,5 +31,30 @@ std::optional<QString> findEpisode(const QString& path, const int anime_id,
 std::optional<QString> findFolder(const QString& path, const int anime_id);
 
 bool isInsideLibraryFolders(const QString& path);
+
+// Episodes found in the library folders, from the last scan. Not persisted; the scan is cheap
+// enough to run on startup.
+class AvailableEpisodes final : public QObject {
+  Q_OBJECT
+
+public:
+  void scan();
+  bool isScanning() const;
+
+  int count(const int animeId) const;
+  int last(const int animeId) const;
+  bool contains(const int animeId, const int episode) const;
+  // The next episode after `watched` is on disk.
+  bool hasNext(const int animeId, const int watched) const;
+
+signals:
+  void scanFinished(int episodeCount);
+
+private:
+  QHash<int, QSet<int>> m_episodes;
+  bool m_scanning = false;
+};
+
+inline AvailableEpisodes availableEpisodes;
 
 }  // namespace track

@@ -27,6 +27,7 @@
 #include "base/string.hpp"
 #include "media/anime.hpp"
 #include "media/anime_db.hpp"
+#include "taiga/options.hpp"
 #include "track/episode.hpp"
 #include "track/recognition_cache.hpp"
 #include "track/recognition_normalize.hpp"
@@ -48,7 +49,18 @@ QString formatEpisodeRange(const std::pair<int, int>& range) {
 Episode parse(std::string_view input, const anitomy::Options options) {
   Episode episode;
 
-  auto elements = anitomy::parse(input, options);
+  // Like v1: strings the user wants ignored are removed before parsing. Comma-separated.
+  std::string cleaned{input};
+  for (const auto& ignored :
+       taiga::opt::ignoredStrings.get().split(u',', Qt::SkipEmptyParts)) {
+    const auto needle = ignored.trimmed().toStdString();
+    if (needle.empty()) continue;
+    for (auto pos = cleaned.find(needle); pos != std::string::npos; pos = cleaned.find(needle)) {
+      cleaned.erase(pos, needle.size());
+    }
+  }
+
+  auto elements = anitomy::parse(cleaned, options);
   episode.setElements(elements);
 
   return episode;

@@ -18,6 +18,7 @@
 
 #include "navigation_item_delegate.hpp"
 
+#include <QLocale>
 #include <QPainter>
 #include <QPainterPath>
 
@@ -25,9 +26,6 @@
 #include "gui/utils/theme.hpp"
 
 namespace gui {
-
-static const auto lineColorLight = QColor{0, 0, 0, 40};
-static const auto lineColorDark = QColor{255, 255, 255, 40};
 
 NavigationItemDelegate::NavigationItemDelegate(QObject* parent) : QStyledItemDelegate(parent) {}
 
@@ -64,7 +62,7 @@ void NavigationItemDelegate::paintBranch(QPainter* painter, QRect rect, bool isL
 
   painter->setPen([painter]() {
     auto pen = painter->pen();
-    pen.setColor(theme.isDark() ? lineColorDark : lineColorLight);
+    pen.setColor(theme.color(Theme::Color::Line));
     return pen;
   }());
 
@@ -80,34 +78,15 @@ void NavigationItemDelegate::paintBranch(QPainter* painter, QRect rect, bool isL
 void NavigationItemDelegate::paintCounter(QPainter* painter, QRect rect, const int count) const {
   const PainterStateSaver painterStateSaver(painter);
 
+  // Flat: a quiet number at the right edge, no badge.
   painter->setFont([painter]() {
     auto font = painter->font();
-    font.setPointSize(8);
-    font.setWeight(QFont::Weight::DemiBold);
+    font.setPointSizeF(font.pointSizeF() * 0.9);
     return font;
   }());
-
-  const QString text = QString::number(count);
-  const QFontMetrics metrics(painter->font());
-  const QRect boundingRect = metrics.boundingRect(text);
-
-  rect.setRight(rect.right() - 8);
-  rect.setLeft(rect.right() - boundingRect.width());
-  rect.setTop(rect.top() + ((rect.height() - boundingRect.height()) / 2));
-  rect.setHeight(boundingRect.height());
-  rect.adjust(-4, -1, 4, 1);
-  if (rect.width() < rect.height()) {
-    rect.setLeft(rect.right() - rect.height());
-  }
-
-  QPainterPath path;
-  path.addRoundedRect(rect, 8, 8);
-  painter->setClipPath(path);
-
-  painter->fillRect(rect, theme.isDark() ? lineColorDark : lineColorLight);
-
-  painter->setPen(QColor(theme.isDark() ? 0xAAAAAA : 0x666666));
-  painter->drawText(rect, Qt::AlignCenter | Qt::TextSingleLine, text);
+  painter->setPen(theme.color(Theme::Color::Faint));
+  painter->drawText(rect.adjusted(0, 0, -10, 0), Qt::AlignRight | Qt::AlignVCenter,
+                    QLocale().toString(count));
 }
 
 void NavigationItemDelegate::paintSeparator(QPainter* painter, const QRect& rect) const {
@@ -115,7 +94,7 @@ void NavigationItemDelegate::paintSeparator(QPainter* painter, const QRect& rect
 
   const int y = rect.center().y();
 
-  painter->setPen(theme.isDark() ? lineColorDark : lineColorLight);
+  painter->setPen(theme.color(Theme::Color::Line));
   painter->drawLine(rect.left() + 8, y, rect.right() - 8, y);
 };
 

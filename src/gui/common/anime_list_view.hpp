@@ -35,7 +35,7 @@ class ListView final : public QTreeView {
 public:
   ListView(QWidget* parent, AnimeListModel* model, AnimeListProxyModel* proxyModel,
            AnimeListContext context);
-  ~ListView() = default;
+  ~ListView() override;
 
   ListViewBase* baseView() {
     return m_base;
@@ -44,9 +44,11 @@ public:
 protected:
   void keyPressEvent(QKeyEvent* event) override;
   void mousePressEvent(QMouseEvent* event) override;
+  void mouseDoubleClickEvent(QMouseEvent* event) override;
   void paintEvent(QPaintEvent* event) override;
 
 private:
+  bool isGroupHeading(const QPoint& point) const;
   ListViewBase* m_base = nullptr;
 };
 

@@ -93,5 +93,6 @@ QString animePageUrl(const int id);
 
 void invalidateAnime(const int id);
 void pruneMissingEntries(const QSet<int>& fetchedIds);
+void applyFetchedEntries(const QList<ListEntry>& entries);
 
 }  // namespace sync

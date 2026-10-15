@@ -30,8 +30,8 @@ class Settings;
 
 namespace compat::v1 {
 
-void readSettings(const std::string& path, const taiga::Settings& settings,
-                  const taiga::Accounts& accounts);
+bool readSettings(const std::string& path, const taiga::Settings& settings,
+                  const taiga::Accounts& accounts, bool onlyMissingOptions = false);
 
 QList<anime::Settings> readAnimeSettings(const std::string& path);
 

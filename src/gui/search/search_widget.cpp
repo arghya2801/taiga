@@ -19,10 +19,13 @@
 #include "search_widget.hpp"
 
 #include <QActionGroup>
+#include <QDate>
 #include <QLineEdit>
+#include <QSignalBlocker>
 #include <QToolBar>
 #include <QToolButton>
 
+#include "base/string.hpp"
 #include "gui/common/anime_list_context.hpp"
 #include "gui/common/anime_list_view.hpp"
 #include "gui/common/anime_list_view_cards.hpp"
@@ -176,7 +179,47 @@ SearchWidget::SearchWidget(QWidget* parent)
     const auto actionSort = new QAction(theme.getIcon("sort"), tr("Sort"), this);
     const auto actionView = new QAction(theme.getIcon("grid_view"), tr("View"), this);
     const auto actionMore = new QAction(theme.getIcon("more_horiz"), tr("More"), this);
+    const auto actionSeason = new QAction(theme.getIcon("lists"), tr("Seasons"), this);
+    m_toolbar->addAction(actionSeason);
     m_toolbar->addAction(actionSort);
+
+    // One click to a season, like v1's season browser.
+    const auto seasonMenu = new QMenu(this);
+    connect(seasonMenu, &QMenu::aboutToShow, this, [this, seasonMenu] {
+      seasonMenu->clear();
+      const auto today = QDate::currentDate();
+      const anime::Season current{FuzzyDate{
+          std::chrono::year{today.year()}, std::chrono::month{static_cast<unsigned>(today.month())},
+          std::chrono::day{static_cast<unsigned>(today.day())}}};
+      auto previous = current;
+      auto next = current;
+      --previous;
+      ++next;
+      const auto add = [this, seasonMenu](const QString& label, const anime::Season& season) {
+        seasonMenu->addAction(u"%1 (%2)"_s.arg(label, formatSeason(season)), this, [this, season] {
+          const QSignalBlocker yearBlock(m_comboYear), seasonBlock(m_comboSeason),
+              typeBlock(m_comboType);
+          m_comboYear->setCurrentIndex(m_comboYear->findData(static_cast<int>(season.year)));
+          m_comboSeason->setCurrentIndex(m_comboSeason->findData(static_cast<int>(season.name)));
+          m_comboType->setCurrentIndex(-1);
+          mainWindow()->searchBox()->clear();
+          auto filters = m_proxyModel->filters();
+          filters.year = int(season.year);
+          filters.season = int(season.name);
+          filters.type.reset();
+          filters.text.clear();
+          m_proxyModel->setFilters(filters);
+          setViewMode(ListViewMode::Grouped);
+          performSearch();
+        });
+      };
+      add(tr("Previous season"), previous);
+      add(tr("Current season"), current);
+      add(tr("Next season"), next);
+    });
+    const auto seasonButton = static_cast<QToolButton*>(m_toolbar->widgetForAction(actionSeason));
+    seasonButton->setPopupMode(QToolButton::InstantPopup);
+    seasonButton->setMenu(seasonMenu);
     m_toolbar->addAction(actionView);
     m_toolbar->addAction(actionMore);
 
@@ -265,6 +308,7 @@ void SearchWidget::initViewMenu() {
   static const QList<QPair<QString, ListViewMode>> items{
       {"List", ListViewMode::List},
       {"Cards", ListViewMode::Cards},
+      {"Grouped", ListViewMode::Grouped},
   };
 
   const auto actionGroup = new QActionGroup(this);
@@ -280,6 +324,10 @@ void SearchWidget::initViewMenu() {
 }
 
 void SearchWidget::setViewMode(ListViewMode mode) {
+  if (mode < ListViewMode::List || mode > ListViewMode::Grouped) mode = ListViewMode::Cards;
+  auto* oldView = m_listView ? static_cast<QAbstractItemView*>(m_listView) : m_listViewCards;
+  if (oldView && mode == m_viewMode) return;
+  const ListViewSelection selection(oldView, m_proxyModel);
   if (m_listView) {
     layout()->removeWidget(m_listView);
     m_listView->deleteLater();
@@ -292,11 +340,15 @@ void SearchWidget::setViewMode(ListViewMode mode) {
   }
 
   m_viewMode = mode;
+  m_proxyModel->setGrouping(mode == ListViewMode::Grouped ? AnimeListGrouping::Type
+                                                          : AnimeListGrouping::None);
 
   switch (mode) {
     case ListViewMode::List:
+    case ListViewMode::Grouped:
       m_listView = new ListView(this, m_model, m_proxyModel, AnimeListContext::Search);
       layout()->addWidget(m_listView);
+      m_listView->setUniformRowHeights(mode != ListViewMode::Grouped);
       m_listView->show();
       break;
 
@@ -306,6 +358,8 @@ void SearchWidget::setViewMode(ListViewMode mode) {
       m_listViewCards->show();
       break;
   }
+  selection.restore(m_listView ? static_cast<QAbstractItemView*>(m_listView) : m_listViewCards,
+                    m_proxyModel);
 }
 
 sync::SearchParams SearchWidget::currentSearchParams() const {

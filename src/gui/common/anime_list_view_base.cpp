@@ -18,11 +18,16 @@
 
 #include "anime_list_view_base.hpp"
 
+#include <QApplication>
+#include <QClipboard>
 #include <QDesktopServices>
+#include <QKeyEvent>
 #include <QLineEdit>
 #include <QListView>
+#include <QTimer>
 #include <QTreeView>
 #include <QUrl>
+#include <limits>
 
 #include "gui/main/main_window.hpp"
 #include "gui/main/navigation_item_delegate.hpp"
@@ -36,32 +41,110 @@
 #include "gui/utils/format.hpp"
 #include "media/anime.hpp"
 #include "media/anime_list.hpp"
+#include "media/anime_list_utils.hpp"
 #include "media/anime_utils.hpp"
 #include "sync/service.hpp"
+#include "taiga/options.hpp"
 #include "track/play.hpp"
 
 namespace gui {
 
-ListViewBase::ListViewBase(QWidget* parent, QAbstractItemView* view, AnimeListModel* model,
+ListViewSelection::ListViewSelection(QAbstractItemView* view, AnimeListProxyModel* proxy) {
+  if (!view) return;
+  QSet<int> seen;
+  for (const auto& row : view->selectionModel()->selectedIndexes()) {
+    const QPersistentModelIndex source(proxy->mapToSource(row.siblingAtColumn(0)));
+    if (source.isValid() && !seen.contains(source.row())) {
+      seen.insert(source.row());
+      rows.append(source);
+    }
+  }
+  current = proxy->mapToSource(view->currentIndex());
+  // Card spacing can leave the viewport's corner outside every item.
+  for (int y = 0; view->model()->rowCount() > 0 && y < view->viewport()->height() && !top.isValid();
+       y += 8)
+    for (int x = 0; x < view->viewport()->width(); x += 8) {
+      const auto index = view->indexAt(QPoint(x, y));
+      if (index.isValid()) {
+        top = proxy->mapToSource(index.siblingAtColumn(0));
+        break;
+      }
+    }
+  focused = view->hasFocus();
+}
+
+void ListViewSelection::restore(QAbstractItemView* view, AnimeListProxyModel* proxy) const {
+  if (!view) return;
+  QItemSelection selection;
+  for (const auto& row : rows) {
+    const auto mapped = proxy->mapFromSource(row);
+    if (mapped.isValid()) selection.select(mapped, mapped);
+  }
+  view->selectionModel()->select(selection,
+                                 QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+  view->selectionModel()->setCurrentIndex(proxy->mapFromSource(current),
+                                          QItemSelectionModel::NoUpdate);
+  if (top.isValid()) {
+    const auto anchor = top;
+    if (auto* callbacks = view->findChild<ListViewBase*>())
+      QTimer::singleShot(0, callbacks, [view, proxy, anchor] {
+        if (anchor.isValid())
+          view->scrollTo(proxy->mapFromSource(anchor), QAbstractItemView::PositionAtTop);
+      });
+  }
+  if (focused) view->setFocus();
+}
+
+ListViewBase::ListViewBase(QWidget*, QAbstractItemView* view, AnimeListModel* model,
                            AnimeListProxyModel* proxyModel, AnimeListContext context)
-    : QObject(parent), m_view(view), m_model(model), m_proxyModel(proxyModel), m_context(context) {
+    : QObject(view), m_view(view), m_model(model), m_proxyModel(proxyModel), m_context(context) {
+  m_view->setAccessibleName(context == AnimeListContext::Search ? tr("Anime search results")
+                                                                : tr("Anime list"));
   m_view->setContextMenuPolicy(Qt::CustomContextMenu);
+  m_view->installEventFilter(this);
   m_view->setSelectionMode(QAbstractItemView::SelectionMode::ExtendedSelection);
 
   m_proxyModel->setSourceModel(m_model);
   m_view->setModel(m_proxyModel);
+  m_proxyModel->setTextFilter(mainWindow()->searchBox()->text());
 
   connect(mainWindow()->searchBox(), &QLineEdit::textChanged, this, &ListViewBase::filterByText);
 
-  connect(m_view, &QAbstractItemView::doubleClicked, this, &ListViewBase::showMediaDialog);
+  connect(m_view, &QAbstractItemView::doubleClicked, this, [this](const QModelIndex& index) {
+    runAction(taiga::opt::listDoubleClick.get(), index);
+  });
 
   connect(m_view, &QWidget::customContextMenuRequested, this, &ListViewBase::showMediaMenu);
 
+  // Selection can clear while the view's base classes are being destroyed.
   connect(m_view->selectionModel(), &QItemSelectionModel::selectionChanged, this,
-          &ListViewBase::updateSelectionStatus);
+          &ListViewBase::updateSelectionStatus, Qt::QueuedConnection);
+}
+
+bool ListViewBase::eventFilter(QObject* watched, QEvent* event) {
+  if (watched == m_view && event->type() == QEvent::ShortcutOverride) {
+    const auto* key = static_cast<QKeyEvent*>(event);
+    if (key->modifiers() == Qt::ControlModifier &&
+        (key->key() == Qt::Key_N || key->key() == Qt::Key_R) && m_view->currentIndex().isValid()) {
+      event->accept();
+      return true;
+    }
+  }
+  return QObject::eventFilter(watched, event);
+}
+
+QString ListViewBase::emptyText() const {
+  if (!m_proxyModel->filters().text.isEmpty())
+    return tr("No titles match your search. Clear the search or adjust the filters.");
+  return m_context == AnimeListContext::Search
+             ? tr("No results. Adjust the search or filters, then press Enter to search %1.")
+                   .arg(sync::serviceName(sync::currentServiceId()))
+             : tr("No titles in this category. Choose another list status or synchronize your "
+                  "list.");
 }
 
 void ListViewBase::filterByText(const QString& text) {
+  if (!m_view->isVisible()) return;
   m_proxyModel->setTextFilter(text);
 }
 
@@ -96,6 +179,32 @@ void ListViewBase::playNextEpisode(const QModelIndex& index) {
   });
 }
 
+void ListViewBase::runAction(int action, const QModelIndex& index) {
+  using taiga::opt::ListAction;
+  const auto anime = m_model->getAnime(m_proxyModel->mapToSource(index));
+  if (!anime) return;
+
+  switch (static_cast<ListAction>(action)) {
+    case ListAction::ViewDetails:
+      MediaDialog::show(mainWindow(), MediaDialogPage::Details, *anime);
+      break;
+    case ListAction::EditEntry:
+      MediaDialog::show(mainWindow(), MediaDialogPage::List, *anime);
+      break;
+    case ListAction::PlayNextEpisode:
+      playNextEpisode(index);
+      break;
+    case ListAction::OpenFolder:
+      openAnimeFolder(*anime);
+      break;
+    case ListAction::OpenPage:
+      openAnimePage(index);
+      break;
+    case ListAction::Nothing:
+      break;
+  }
+}
+
 void ListViewBase::showMediaDialog(const QModelIndex& index) {
   const auto mappedIndex = m_proxyModel->mapToSource(index);
   const auto anime = m_model->getAnime(mappedIndex);
@@ -104,8 +213,12 @@ void ListViewBase::showMediaDialog(const QModelIndex& index) {
 }
 
 void ListViewBase::showMediaMenu() {
+  if (auto* menu = selectionMenu()) menu->popup();
+}
+
+MediaMenu* ListViewBase::selectionMenu() {
   const auto indexes = selectedIndexes();
-  if (indexes.isEmpty()) return;
+  if (indexes.isEmpty()) return nullptr;
 
   QList<Anime> items;
   QMap<int, ListEntry> entries;
@@ -120,8 +233,71 @@ void ListViewBase::showMediaMenu() {
     }
   }
 
-  auto* menu = new MediaMenu(m_view, items, entries, m_view->selectionModel(), m_context);
-  menu->popup();
+  return items.isEmpty()
+             ? nullptr
+             : new MediaMenu(m_view, items, entries, m_view->selectionModel(), m_context);
+}
+
+bool ListViewBase::handleKey(QKeyEvent* event) {
+  const auto current = m_view->currentIndex();
+  const auto* item = m_model->getAnime(m_proxyModel->mapToSource(current));
+  const int key = event->key();
+  if (key == Qt::Key_Return || key == Qt::Key_Enter) {
+    if (item) runAction(taiga::opt::listDoubleClick.get(), current);
+    return true;
+  }
+  if (key == Qt::Key_Delete && event->modifiers() == Qt::NoModifier) {
+    if (auto* menu = selectionMenu()) {
+      menu->removeFromList();
+      menu->deleteLater();
+    }
+    return true;
+  }
+  if (!(event->modifiers() & Qt::ControlModifier)) return false;
+  if (key == Qt::Key_C) {
+    QStringList titles;
+    for (const auto& index : selectedIndexes())
+      if (const auto* selected = m_model->getAnime(m_proxyModel->mapToSource(index)))
+        titles.append(QString::fromStdString(anime::preferredTitle(*selected)));
+    if (!titles.isEmpty()) QApplication::clipboard()->setText(titles.join("\r\n"));
+    return true;
+  }
+  if (!item) return false;
+  if (key >= Qt::Key_0 && key <= Qt::Key_9) {
+    for (const auto& index : selectedIndexes()) {
+      const auto* entry = m_model->getListEntry(m_proxyModel->mapToSource(index));
+      if (!anime::list::isInList(entry)) continue;
+      auto updated = *entry;
+      updated.score = (key - Qt::Key_0) * 10;
+      anime::list::save(updated);
+    }
+    return true;
+  }
+  if (key == Qt::Key_Plus || key == Qt::Key_Equal || key == Qt::Key_Minus) {
+    const auto* entry = m_model->getListEntry(m_proxyModel->mapToSource(current));
+    if (!anime::list::isInList(entry)) return true;
+    const qint64 number = qint64(entry->watched_episodes) + (key == Qt::Key_Minus ? -1 : 1);
+    if (number < 0 || number > std::numeric_limits<int>::max() ||
+        (item->episode_count > 0 && number > item->episode_count))
+      return true;
+    anime::list::save(anime::list::entryWithEpisodeWatched(*item, entry, int(number)));
+    return true;
+  }
+  if (key == Qt::Key_O) {
+    runAction(int(taiga::opt::ListAction::OpenFolder), current);
+    return true;
+  }
+  if (key == Qt::Key_N) {
+    playNextEpisode(current);
+    return true;
+  }
+  if (key == Qt::Key_R) {
+    MediaMenu* menu = new MediaMenu(m_view, {*item}, {}, nullptr, m_context);
+    menu->playRandomEpisode();
+    menu->deleteLater();
+    return true;
+  }
+  return false;
 }
 
 void ListViewBase::updateSelectionStatus(const QItemSelection&, const QItemSelection&) {

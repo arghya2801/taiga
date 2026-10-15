@@ -30,6 +30,7 @@ enum class NavigationItemDataRole {
   IsSeparator,
   ListStatus,
   Counter,
+  MangaStatus,
 };
 
 class NavigationItemDelegate final : public QStyledItemDelegate {

@@ -28,6 +28,7 @@
 #include "gui/models/anime_list_model.hpp"
 #include "gui/models/anime_list_proxy_model.hpp"
 #include "gui/utils/painters.hpp"
+#include "taiga/options.hpp"
 
 namespace gui {
 
@@ -45,12 +46,13 @@ ListViewCards::ListViewCards(QWidget* parent, AnimeListModel* model,
   setWordWrap(true);
 }
 
+ListViewCards::~ListViewCards() {
+  delete m_base;
+}
+
 void ListViewCards::keyPressEvent(QKeyEvent* event) {
-  if (event->key() == Qt::Key::Key_Return || event->key() == Qt::Key::Key_Enter) {
-    const auto indexes = selectionModel()->selectedIndexes();
-    for (const auto& index : indexes) {
-      m_base->showMediaDialog(index);
-    }
+  if (m_base->handleKey(event)) {
+    event->accept();
     return;
   }
 
@@ -62,11 +64,7 @@ void ListViewCards::mousePressEvent(QMouseEvent* event) {
     const QModelIndex index = indexAt(event->pos());
     if (index.isValid()) {
       setCurrentIndex(index);
-      if (m_base->context() == AnimeListContext::Search) {
-        m_base->openAnimePage(index);
-      } else {
-        m_base->playNextEpisode(index);
-      }
+      m_base->runAction(taiga::opt::listMiddleClick.get(), index);
       return;
     }
   }
@@ -76,7 +74,7 @@ void ListViewCards::mousePressEvent(QMouseEvent* event) {
 
 void ListViewCards::paintEvent(QPaintEvent* event) {
   if (model() && model()->rowCount() == 0) {
-    paintEmptyListText(this, tr("No items found."));
+    paintEmptyListText(this, m_base->emptyText());
   }
 
   QListView::paintEvent(event);

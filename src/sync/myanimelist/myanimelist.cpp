@@ -126,12 +126,14 @@ void Service::search(const SearchParams& params, const int offset) {
     const auto root = json->object();
 
     QList<int> ids;
+    QList<Anime> items;
     for (const auto& value : root["data"].toArray()) {
       if (const auto item = parseAnime(value.toObject()["node"])) {
-        anime::db.updateItem(*item);
+        items.append(*item);
         ids.append(item->id);
       }
     }
+    anime::db.updateItems(items);
 
     emit searchCompleted(params, ids);
 
@@ -191,7 +193,7 @@ void Service::fetchListEntries(const int offset, QSet<int> fetchedIds) {
       }
     }
     anime::db.updateItems(items);
-    anime::db.updateEntries(entries);
+    sync::applyFetchedEntries(entries);
 
     if (const auto nextOffset = pagingOffset(root["paging"].toObject(), u"next"_s)) {
       fetchListEntries(*nextOffset, fetchedIds);

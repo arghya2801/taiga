@@ -34,13 +34,19 @@ namespace taiga {
 
 void Settings::init() const {
   const auto appVersion = taiga::version().to_string();
+  const auto legacy = std::format("{}/v1/settings.xml", get_data_path());
 
   // v1 to v2
   if (!QFile::exists(fileName())) {
-    compat::v1::readSettings(std::format("{}/v1/settings.xml", get_data_path()), *this, accounts);
+    if (compat::v1::readSettings(legacy, *this, accounts)) setValue("meta.v1SettingsVersion", 2);
     setValue("meta.version", appVersion);
     return;
   }
+
+  if (value("meta.v1SettingsVersion", 0).toInt() < 2 &&
+      QFile::exists(QString::fromStdString(legacy)) &&
+      compat::v1::readSettings(legacy, *this, accounts, true))
+    setValue("meta.v1SettingsVersion", 2);
 
   // v2.x
   const auto fileVersion = value("meta.version").toString().toStdString();

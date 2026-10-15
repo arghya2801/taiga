@@ -52,7 +52,7 @@ void Service::logError(const QString& message) {
 }
 
 void Service::onAuthenticationCompleted(bool authenticated) {
-  switch (currentServiceId()) {
+  switch (id_) {
     case ServiceId::MyAnimeList:
       taiga::accounts.setMyanimelistAuthenticated(authenticated);
       break;
@@ -64,7 +64,7 @@ void Service::onAuthenticationCompleted(bool authenticated) {
       break;
   }
 
-  if (authenticated) {
+  if (authenticated && id_ == currentServiceId()) {
     synchronize();
   }
 }
@@ -294,6 +294,18 @@ void pruneMissingEntries(const QSet<int>& fetchedIds) {
   for (const auto animeId : staleIds) {
     anime::db.deleteEntry(animeId);
   }
+}
+
+void applyFetchedEntries(const QList<ListEntry>& entries) {
+  QList<ListEntry> accepted;
+  accepted.reserve(entries.size());
+  for (const auto& entry : entries) {
+    if (queue.hasItem(entry.anime_id)) continue;
+    const auto* local = anime::db.entry(entry.anime_id);
+    if (local && local->last_updated > entry.last_updated) continue;
+    accepted.append(entry);
+  }
+  anime::db.updateEntries(accepted);
 }
 
 }  // namespace sync

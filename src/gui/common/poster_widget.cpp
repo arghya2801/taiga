@@ -87,7 +87,7 @@ void PosterWidget::paintEvent(QPaintEvent*) {
     painter.setClipPath(path);
   }
 
-  painter.fillRect(rect(), theme.isDark() ? palette().dark() : palette().mid());
+  painter.fillRect(rect(), theme.color(Theme::Color::Sunken));
 
   if (m_pixmap.isNull()) return;
 

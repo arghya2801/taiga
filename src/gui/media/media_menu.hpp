@@ -30,6 +30,8 @@ class QItemSelectionModel;
 
 namespace gui {
 
+void openAnimeFolder(const Anime& item);
+
 class MediaMenu final : public QMenu {
   Q_OBJECT
   Q_DISABLE_COPY_MOVE(MediaMenu)
@@ -40,6 +42,8 @@ public:
   ~MediaMenu() = default;
 
   void popup();
+  void removeFromList() const;
+  void playRandomEpisode() const;
 
 private slots:
   void addToList(const anime::list::Status status) const;
@@ -55,9 +59,7 @@ private slots:
   void matchNowPlaying() const;
   void openFolder() const;
   void playEpisode(int number) const;
-  void playRandomEpisode() const;
   void refresh() const;
-  void removeFromList() const;
   void search() const;
   void searchAniDB() const;
   void searchAniList() const;

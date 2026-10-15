@@ -19,6 +19,8 @@
 #pragma once
 
 #include <QByteArray>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QString>
 
 #include "base/settings.hpp"
@@ -26,7 +28,7 @@
 namespace gui {
 enum class ListViewMode;
 struct AnimeListProxyModelFilter;
-}
+}  // namespace gui
 
 namespace taiga {
 
@@ -35,6 +37,7 @@ public:
   int animeListSortColumn() const;
   Qt::SortOrder animeListSortOrder() const;
   gui::ListViewMode animeListViewMode() const;
+  QByteArray headerState(const QString& view) const;
   QByteArray mainWindowGeometry() const;
   QByteArray mediaDialogGeometry() const;
   QByteArray mediaDialogSplitterState() const;
@@ -42,10 +45,15 @@ public:
   int searchListSortColumn() const;
   Qt::SortOrder searchListSortOrder() const;
   gui::ListViewMode searchListViewMode() const;
+  QJsonObject statisticsState() const;
+  QJsonArray statisticsViews() const;
+  bool setStatisticsState(const QJsonObject& state) const;
+  bool setStatisticsViews(const QJsonArray& views) const;
 
   void setAnimeListSortColumn(const int column) const;
   void setAnimeListSortOrder(const Qt::SortOrder order) const;
   void setAnimeListViewMode(const gui::ListViewMode mode) const;
+  void setHeaderState(const QString& view, const QByteArray& state) const;
   void setMainWindowGeometry(const QByteArray& geometry) const;
   void setMediaDialogGeometry(const QByteArray& geometry) const;
   void setMediaDialogSplitterState(const QByteArray& state) const;

@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include <QHash>
 #include <QPersistentModelIndex>
 #include <QPixmap>
 #include <QSet>
@@ -50,6 +51,7 @@ private:
   qreal m_angle = 0.0;
   mutable QTimer m_timerSpinner;
   mutable QSet<QPersistentModelIndex> m_loadingIndices;
+  mutable QHash<int, QString> m_synopses;  // cleaned text, by anime id
 };
 
 }  // namespace gui

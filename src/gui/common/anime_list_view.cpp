@@ -21,11 +21,14 @@
 #include <QHeaderView>
 #include <QKeyEvent>
 
+#include "base/string.hpp"
 #include "gui/common/anime_list_item_delegate.hpp"
 #include "gui/common/anime_list_view_base.hpp"
 #include "gui/models/anime_list_model.hpp"
 #include "gui/models/anime_list_proxy_model.hpp"
 #include "gui/utils/painters.hpp"
+#include "gui/utils/widgets.hpp"
+#include "taiga/options.hpp"
 #include "track/play.hpp"
 
 namespace gui {
@@ -67,6 +70,12 @@ ListView::ListView(QWidget* parent, AnimeListModel* model, AnimeListProxyModel* 
   header()->resizeSection(AnimeListModel::COLUMN_AVERAGE, 75);
   header()->resizeSection(AnimeListModel::COLUMN_TYPE, 75);
   header()->resizeSection(AnimeListModel::COLUMN_LAST_UPDATED, 110);
+  // Airing status sits left of the title, as in v1.
+  header()->moveSection(header()->visualIndex(AnimeListModel::COLUMN_AIRING), 0);
+  header()->resizeSection(AnimeListModel::COLUMN_AIRING, 24);
+  // ".v2": layouts saved before the airing status column existed would misplace it.
+  setupHeaderMenu(header(),
+                  context == AnimeListContext::Search ? u"searchList.v2"_s : u"animeList.v2"_s);
 
   // `sortByColumn` needs to be called before `setSortingEnabled`.
   // Otherwise the sort column is set to `0`.
@@ -77,12 +86,14 @@ ListView::ListView(QWidget* parent, AnimeListModel* model, AnimeListProxyModel* 
           qOverload<const QModelIndex&>(&QAbstractItemView::edit));
 }
 
+ListView::~ListView() {
+  // Shared callbacks must disconnect before the view's base classes tear down selection.
+  delete m_base;
+}
+
 void ListView::keyPressEvent(QKeyEvent* event) {
-  if (event->key() == Qt::Key::Key_Return || event->key() == Qt::Key::Key_Enter) {
-    const auto indexes = selectionModel()->selectedRows();
-    for (const auto& index : indexes) {
-      m_base->showMediaDialog(index);
-    }
+  if (m_base->handleKey(event)) {
+    event->accept();
     return;
   }
 
@@ -90,15 +101,15 @@ void ListView::keyPressEvent(QKeyEvent* event) {
 }
 
 void ListView::mousePressEvent(QMouseEvent* event) {
+  if (isGroupHeading(event->pos())) {
+    event->accept();
+    return;
+  }
   if (event->button() == Qt::MouseButton::MiddleButton) {
     const QModelIndex index = indexAt(event->pos());
     if (index.isValid()) {
       setCurrentIndex(index);
-      if (m_base->context() == AnimeListContext::Search) {
-        m_base->openAnimePage(index);
-      } else {
-        m_base->playNextEpisode(index);
-      }
+      m_base->runAction(taiga::opt::listMiddleClick.get(), index);
       return;
     }
   }
@@ -106,9 +117,23 @@ void ListView::mousePressEvent(QMouseEvent* event) {
   QTreeView::mousePressEvent(event);
 }
 
+bool ListView::isGroupHeading(const QPoint& point) const {
+  const auto index = indexAt(point);
+  return index.isValid() &&
+         !index.data(int(AnimeListItemDataRole::GroupHeading)).toString().isEmpty() &&
+         point.y() < visualRect(index).top() + 30;
+}
+void ListView::mouseDoubleClickEvent(QMouseEvent* event) {
+  if (isGroupHeading(event->pos())) {
+    event->accept();
+    return;
+  }
+  QTreeView::mouseDoubleClickEvent(event);
+}
+
 void ListView::paintEvent(QPaintEvent* event) {
   if (model() && model()->rowCount() == 0) {
-    paintEmptyListText(this, tr("No items found."));
+    paintEmptyListText(this, m_base->emptyText());
   }
 
   QTreeView::paintEvent(event);

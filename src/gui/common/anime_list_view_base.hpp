@@ -23,15 +23,27 @@
 #include <QTreeWidget>
 
 #include "gui/common/anime_list_context.hpp"
+class QKeyEvent;
 
 namespace gui {
 
 class AnimeListModel;
 class AnimeListProxyModel;
+class MediaMenu;
 
 enum class ListViewMode {
   List,
   Cards,
+  Grouped,
+};
+
+// Source indexes survive a proxy regrouping when switching between list and cards.
+struct ListViewSelection {
+  ListViewSelection(QAbstractItemView* view, AnimeListProxyModel* proxy);
+  void restore(QAbstractItemView* view, AnimeListProxyModel* proxy) const;
+  QList<QPersistentModelIndex> rows;
+  QPersistentModelIndex current, top;
+  bool focused = false;
 };
 
 class ListViewBase final : public QObject {
@@ -42,20 +54,27 @@ public:
   ListViewBase(QWidget* parent, QAbstractItemView* view, AnimeListModel* model,
                AnimeListProxyModel* proxyModel, AnimeListContext context);
   ~ListViewBase() = default;
+  bool handleKey(QKeyEvent* event);
+  QString emptyText() const;
 
   AnimeListContext context() const {
     return m_context;
   }
 
+protected:
+  bool eventFilter(QObject* watched, QEvent* event) override;
+
 public slots:
   void filterByText(const QString& text);
   void openAnimePage(const QModelIndex& index);
   void playNextEpisode(const QModelIndex& index);
+  void runAction(int action, const QModelIndex& index);
   void showMediaDialog(const QModelIndex& index);
   void showMediaMenu();
   void updateSelectionStatus(const QItemSelection& selected, const QItemSelection& deselected);
 
 private:
+  MediaMenu* selectionMenu();
   QModelIndexList selectedIndexes();
 
   AnimeListModel* m_model = nullptr;

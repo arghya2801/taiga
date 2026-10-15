@@ -35,6 +35,28 @@ QString Session::fileName() const {
   return u"%1/session.json"_s.arg(get_data_path());
 }
 
+QJsonObject Session::statisticsState() const {
+  return QJsonDocument::fromJson(value("statistics.state").toByteArray()).object();
+}
+
+QJsonArray Session::statisticsViews() const {
+  return QJsonDocument::fromJson(value("statistics.views").toByteArray()).array();
+}
+
+bool Session::setStatisticsState(const QJsonObject& state) const {
+  auto store = settings();
+  store.setValue("statistics.state", QJsonDocument(state).toJson(QJsonDocument::Compact));
+  store.sync();
+  return store.status() == QSettings::NoError;
+}
+
+bool Session::setStatisticsViews(const QJsonArray& views) const {
+  auto store = settings();
+  store.setValue("statistics.views", QJsonDocument(views).toJson(QJsonDocument::Compact));
+  store.sync();
+  return store.status() == QSettings::NoError;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 int Session::animeListSortColumn() const {
@@ -48,6 +70,10 @@ Qt::SortOrder Session::animeListSortOrder() const {
 gui::ListViewMode Session::animeListViewMode() const {
   return value("animeList.viewMode", static_cast<int>(gui::ListViewMode::List))
       .value<gui::ListViewMode>();
+}
+
+QByteArray Session::headerState(const QString& view) const {
+  return QByteArray::fromBase64(value(u"%1.headerState"_s.arg(view), QByteArray{}).toByteArray());
 }
 
 QByteArray Session::mainWindowGeometry() const {
@@ -115,6 +141,10 @@ void Session::setAnimeListSortOrder(const Qt::SortOrder order) const {
 
 void Session::setAnimeListViewMode(const gui::ListViewMode mode) const {
   setValue("animeList.viewMode", static_cast<int>(mode));
+}
+
+void Session::setHeaderState(const QString& view, const QByteArray& state) const {
+  setValue(u"%1.headerState"_s.arg(view), state.toBase64().toStdString());
 }
 
 void Session::setMainWindowGeometry(const QByteArray& geometry) const {

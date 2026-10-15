@@ -31,8 +31,10 @@
 #include "media/anime.hpp"
 #include "media/anime_db.hpp"
 #include "media/anime_list.hpp"
+#include "media/anime_list_utils.hpp"
 #include "sync/myanimelist/myanimelist_utils.hpp"
 #include "sync/queue.hpp"
+#include "sync/service.hpp"
 #include "taiga/accounts.hpp"
 #include "taiga/version.hpp"
 
@@ -42,7 +44,12 @@ bool exportAsMarkdown(const std::string& path) {
   std::map<anime::list::Status, std::vector<std::string>> status_lists;
 
   for (const auto& entry : anime::db.entries()) {
-    const auto item = anime::db.item(entry.anime_id);
+    if (!anime::list::isInList(&entry)) continue;
+    Anime missing;
+    missing.id = entry.anime_id;
+    missing.titles.romaji = std::format("Unknown title #{}", entry.anime_id);
+    const auto* item = anime::db.item(entry.anime_id);
+    if (!item) item = &missing;
     const auto line =
         std::format("{} ({}/{})", item->titles.romaji, entry.watched_episodes, item->episode_count);
     status_lists[entry.status].push_back(line);
@@ -54,7 +61,7 @@ bool exportAsMarkdown(const std::string& path) {
     });
   }
 
-  QFile file(QString::fromStdString(path));
+  QSaveFile file(QString::fromStdString(path));
 
   if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return false;
 
@@ -67,13 +74,13 @@ bool exportAsMarkdown(const std::string& path) {
     }
   }
 
-  file.write(text.toUtf8());
-  file.close();
-
-  return true;
+  const auto bytes = text.toUtf8();
+  return file.write(bytes) == bytes.size() && file.commit();
 }
 
 bool exportAsXml(const std::string& path) {
+  // A provider's numeric ID must never be presented as an unrelated MAL ID.
+  if (sync::currentServiceId() != sync::ServiceId::MyAnimeList) return false;
   constexpr auto format_series_type = [](anime::Type type) {
     // clang-format off
     switch (type) {
@@ -120,15 +127,18 @@ bool exportAsXml(const std::string& path) {
   xml.writeStartElement("myanimelist");
 
   std::map<anime::list::Status, int> status_counts;
+  int total = 0;
   for (const auto& entry : anime::db.entries()) {
+    if (!anime::list::isInList(&entry)) continue;
     ++status_counts[entry.status];
+    ++total;
   }
 
   xml.writeStartElement("myinfo");
   xml.writeNumberElement("user_id", 0);
   xml.writeTextElement("user_name", taiga::accounts.myanimelistUsername());
   xml.writeNumberElement("user_export_type", 1);  // anime
-  xml.writeNumberElement("user_total_anime", anime::db.entries().count());
+  xml.writeNumberElement("user_total_anime", total);
   xml.writeNumberElement("user_total_watching", status_counts[anime::list::Status::Watching]);
   xml.writeNumberElement("user_total_completed", status_counts[anime::list::Status::Completed]);
   xml.writeNumberElement("user_total_onhold", status_counts[anime::list::Status::OnHold]);
@@ -137,12 +147,17 @@ bool exportAsXml(const std::string& path) {
   xml.writeEndElement();  // myinfo
 
   for (const auto& entry : anime::db.entries()) {
-    const auto item = anime::db.item(entry.anime_id);
+    if (!anime::list::isInList(&entry)) continue;
+    Anime missing;
+    missing.id = entry.anime_id;
+    missing.titles.romaji = std::format("Unknown title #{}", entry.anime_id);
+    const auto* item = anime::db.item(entry.anime_id);
+    if (!item) item = &missing;
     xml.writeStartElement("anime");
-    xml.writeNumberElement("series_animedb_id", item->id);  // @TODO: pass actual MAL ID
+    xml.writeNumberElement("series_animedb_id", entry.anime_id);
     xml.writeTextElement("series_title", item->titles.romaji);
     xml.writeTextElement("series_type", format_series_type(item->type));
-    xml.writeNumberElement("series_episodes", item->episode_count);
+    xml.writeNumberElement("series_episodes", std::max(0, item->episode_count));
     xml.writeNumberElement("my_id", 0);
     xml.writeNumberElement("my_watched_episodes", entry.watched_episodes);
     xml.writeTextElement("my_start_date", entry.date_started.to_string());
@@ -167,7 +182,7 @@ bool exportAsXml(const std::string& path) {
   xml.writeEndElement();  // myanimelist
   xml.writeEndDocument();
 
-  return true;
+  return xml.commit();
 }
 
 }  // namespace anime::list
