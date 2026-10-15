@@ -179,6 +179,45 @@ Summary calculate(const QList<Record>& records, const Filter& filter, QDate toda
   return s;
 }
 
+PeriodComparison comparePeriods(const QList<Record>& records, Period first, Period second,
+                                Dimension dimension) {
+  PeriodComparison result;
+  if (first.from < 1 || first.to > 9999 || first.from > first.to || second.from < 1 ||
+      second.to > 9999 || second.from > second.to ||
+      (first.from <= second.to && second.from <= first.to))
+    return result;
+  result.valid = true;
+  QMap<QString, ComparedGroup> groups;
+  QSet<int> seen;
+  const auto add = [](Group& group, const Record& r) {
+    group.ids.append(r.id);
+    if (std::isfinite(r.score) && r.score > 0 && r.score <= 10) {
+      ++group.scored;
+      group.scoreSum += r.score;
+    }
+  };
+  for (const auto& r : records) {
+    if (r.id <= 0 || seen.contains(r.id) || r.status != "Completed") continue;
+    seen.insert(r.id);
+    bool ok = false;
+    const int year = r.completionYear.toInt(&ok);
+    if (!ok || year < 1 || year > 9999) {
+      ++result.missingDates;
+      continue;
+    }
+    const bool inFirst = year >= first.from && year <= first.to;
+    if (!inFirst && (year < second.from || year > second.to)) continue;
+    add(inFirst ? result.first : result.second, r);
+    for (const auto& key : keys(r, dimension)) {
+      auto& group = groups[key];
+      group.name = key;
+      add(inFirst ? group.first : group.second, r);
+    }
+  }
+  result.groups = groups.values();
+  return result;
+}
+
 ActivitySummary calculateActivity(const QList<ActivityChange>& changes, const QSet<int>& ids) {
   ActivitySummary result;
   QMap<QString, Group> days, months;

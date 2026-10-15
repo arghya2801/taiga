@@ -72,6 +72,10 @@ ListViewMode ListWidget::viewMode() const {
 }
 
 void ListWidget::setViewMode(ListViewMode mode) {
+  if (mode < ListViewMode::List || mode > ListViewMode::Grouped) mode = ListViewMode::List;
+  auto* oldView = m_listView ? static_cast<QAbstractItemView*>(m_listView) : m_listViewCards;
+  if (oldView && mode == m_viewMode) return;
+  const ListViewSelection selection(oldView, m_proxyModel);
   if (m_listView) {
     layout()->removeWidget(m_listView);
     m_listView->deleteLater();
@@ -102,6 +106,8 @@ void ListWidget::setViewMode(ListViewMode mode) {
       m_listViewCards->show();
       break;
   }
+  selection.restore(m_listView ? static_cast<QAbstractItemView*>(m_listView) : m_listViewCards,
+                    m_proxyModel);
 }
 
 void ListWidget::saveState() {

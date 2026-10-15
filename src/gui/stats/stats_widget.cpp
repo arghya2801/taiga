@@ -27,6 +27,8 @@
 #include <QFrame>
 #include <QGridLayout>
 #include <QHeaderView>
+#include <QInputDialog>
+#include <QJsonArray>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
@@ -60,6 +62,7 @@
 #include "media/manga_library.hpp"
 #include "sync/service.hpp"
 #include "taiga/accounts.hpp"
+#include "taiga/session.hpp"
 #include "taiga/settings.hpp"
 
 namespace gui {
@@ -86,6 +89,11 @@ enum Chart {
 };
 constexpr int kTitlesTab = 5;
 enum Role { ValueRole = Qt::UserRole + 1, RatioRole, NoteRole, IdsRole, ValueTextRole };
+struct StatsResult {
+  stats::Summary summary;
+  stats::ActivitySummary activity;
+  stats::PeriodComparison periods;
+};
 QString hours(qint64 seconds) {
   return QLocale().toString(seconds / 3600.0, 'f', 1);
 }
@@ -516,7 +524,7 @@ StatsWidget::StatsWidget(QWidget* parent) : PageWidget(parent) {
   kind_->setAccessibleName(tr("Statistics list"));
   kind_->addItems({tr("Anime"), tr("Manga")});
   m_toolbarLayout->insertWidget(1, kind_);
-  auto* filterToggle = new QPushButton(tr("Filters"), this);
+  auto* filterToggle = filterToggle_ = new QPushButton(tr("Filters"), this);
   filterToggle->setCheckable(true);
   filterToggle->setObjectName("statsFilterToggle");
   m_toolbarLayout->insertWidget(2, filterToggle);
@@ -527,6 +535,30 @@ StatsWidget::StatsWidget(QWidget* parent) : PageWidget(parent) {
     else if (auto* window = mainWindow())
       QMetaObject::invokeMethod(window, "synchronize");
   });
+  auto* savedBar = new QHBoxLayout;
+  savedBar->setContentsMargins(20, 0, 20, 8);
+  savedViews_ = new QComboBox(this);
+  savedViews_->setObjectName("statsSavedViews");
+  savedViews_->setAccessibleName(tr("Saved statistics views"));
+  savedViews_->setMinimumContentsLength(14);
+  savedViews_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+  savedBar->addWidget(savedViews_, 1);
+  auto* saveViewButton = new QPushButton(tr("Save view..."), this);
+  saveViewButton->setObjectName("statsSaveView");
+  updateView_ = new QPushButton(tr("Update"), this);
+  updateView_->setObjectName("statsUpdateView");
+  updateView_->setToolTip(tr("Replace the selected saved view with the current settings."));
+  deleteView_ = new QPushButton(tr("Delete"), this);
+  deleteView_->setObjectName("statsDeleteView");
+  for (auto* button : {saveViewButton, updateView_, deleteView_}) savedBar->addWidget(button);
+  static_cast<QVBoxLayout*>(layout())->addLayout(savedBar);
+  viewNotice_ = new QLabel(this);
+  viewNotice_->setObjectName("statsViewNotice");
+  viewNotice_->setTextFormat(Qt::PlainText);
+  viewNotice_->setWordWrap(true);
+  viewNotice_->setContentsMargins(20, 0, 20, 4);
+  viewNotice_->hide();
+  layout()->addWidget(viewNotice_);
   auto* controls = new QWidget(this);
   controls->setObjectName("statsFilters");
   auto* grid = new QGridLayout(controls);
@@ -560,8 +592,23 @@ StatsWidget::StatsWidget(QWidget* parent) : PageWidget(parent) {
     }
     invalidate();
   });
-  for (auto* box : {kind_, status_, format_, year_, genre_, studio_})
+  for (auto* box : {status_, format_, year_, genre_, studio_})
     connect(box, &QComboBox::currentIndexChanged, this, [this] { invalidate(); });
+  connect(kind_, &QComboBox::currentIndexChanged, this, [this] {
+    for (auto* box : {status_, format_, year_, genre_, studio_}) {
+      const QSignalBlocker block(box);
+      box->setCurrentIndex(0);
+    }
+    search_->clear();
+    activitySearch_->clear();
+    const QSignalBlocker timelineBlock(timelineYear_);
+    timelineYear_->clear();
+    restoredTimelineYear_.clear();
+    drilled_ = false;
+    drillIds_.clear();
+    drillLabel_.clear();
+    invalidate();
+  });
 
   auto* metrics = new StatsGrid(165, 4, this);
   metrics->setContentsMargins(20, 12, 20, 20);
@@ -697,6 +744,93 @@ StatsWidget::StatsWidget(QWidget* parent) : PageWidget(parent) {
   ratingsBox->addStretch();
 
   auto* tasteBox = page(tr("Taste"));
+  auto* periods = new StatsCard(
+      tr("How your taste changes"),
+      tr("Compare completed titles from two periods using your finish years and current ratings. "
+         "This compares what you completed, not how you rated it at the time."));
+  auto* periodControls = new QGridLayout;
+  const auto yearBox = [&](const QString& name, const QString& label, int year) {
+    auto* box = new QSpinBox(periods);
+    box->setObjectName(name);
+    box->setAccessibleName(label);
+    box->setRange(1, 9999);
+    box->setValue(year);
+    return box;
+  };
+  const int currentYear = QDate::currentDate().year();
+  firstFrom_ = yearBox("statsFirstFrom", tr("First period, from year"), currentYear - 5);
+  firstTo_ = yearBox("statsFirstTo", tr("First period, through year"), currentYear - 3);
+  secondFrom_ = yearBox("statsSecondFrom", tr("Second period, from year"), currentYear - 2);
+  secondTo_ = yearBox("statsSecondTo", tr("Second period, through year"), currentYear);
+  for (int row = 0; row < 2; ++row) {
+    auto* caption = new QLabel(row ? tr("Period B") : tr("Period A"), periods);
+    auto* from = row ? secondFrom_ : firstFrom_;
+    auto* through = row ? secondTo_ : firstTo_;
+    caption->setBuddy(from);
+    periodControls->addWidget(caption, row, 0);
+    periodControls->addWidget(from, row, 1);
+    periodControls->addWidget(new QLabel(tr("through"), periods), row, 2);
+    periodControls->addWidget(through, row, 3);
+  }
+  periodDimension_ = new QComboBox(periods);
+  periodDimension_->setObjectName("statsPeriodDimension");
+  periodDimension_->setAccessibleName(tr("Compare taste category"));
+  for (const auto& [label, dimension] :
+       QList<QPair<QString, stats::Dimension>>{{tr("Genres"), stats::Dimension::Genre},
+                                               {tr("Studios / authors"), stats::Dimension::Studio},
+                                               {tr("Formats"), stats::Dimension::Format}})
+    periodDimension_->addItem(label, int(dimension));
+  periodMinimum_ = new QSpinBox(periods);
+  periodMinimum_->setObjectName("statsPeriodMinimum");
+  periodMinimum_->setRange(1, 100000);
+  periodMinimum_->setValue(3);
+  periodMinimum_->setPrefix(tr("Min. ratings per period: "));
+  periodMinimum_->setAccessibleName(tr("Minimum ratings in each period for a score change"));
+  periodMinimum_->setToolTip(
+      tr("Counts and shares always appear. Score changes need this many "
+         "rated titles in both periods."));
+  periodControls->addWidget(periodDimension_, 2, 0, 1, 2);
+  periodControls->addWidget(periodMinimum_, 2, 2, 1, 2);
+  static_cast<QVBoxLayout*>(periods->layout())->addLayout(periodControls);
+  periodNote_ = new QLabel(periods);
+  periodNote_->setObjectName("statsPeriodNote");
+  periodNote_->setWordWrap(true);
+  periodNote_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+  periods->layout()->addWidget(periodNote_);
+  periodModel_ = new QStandardItemModel(this);
+  periodModel_->setHorizontalHeaderLabels({tr("Category"), tr("A titles / share"), tr("A mean"),
+                                           tr("B titles / share"), tr("B mean"), tr("Share B - A"),
+                                           tr("Score B - A")});
+  auto* periodProxy = new QSortFilterProxyModel(this);
+  periodProxy->setSourceModel(periodModel_);
+  periodProxy->setSortRole(Qt::UserRole);
+  periodView_ = new QTableView(periods);
+  periodView_->setObjectName("statsPeriodComparison");
+  periodView_->setAccessibleName(tr("Taste comparison by completion period"));
+  periodView_->setModel(periodProxy);
+  periodView_->setSortingEnabled(true);
+  periodView_->sortByColumn(5, Qt::DescendingOrder);
+  periodView_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+  periodView_->setAlternatingRowColors(true);
+  periodView_->setSelectionBehavior(QAbstractItemView::SelectRows);
+  periodView_->verticalHeader()->hide();
+  periodView_->horizontalHeader()->setStretchLastSection(true);
+  periodView_->setMinimumHeight(280);
+  periodView_->setColumnWidth(0, 160);
+  for (int column : {1, 3}) periodView_->setColumnWidth(column, 115);
+  for (int column : {2, 4}) periodView_->setColumnWidth(column, 80);
+  periodView_->setColumnWidth(5, 115);
+  periods->layout()->addWidget(periodView_);
+  tasteBox->addWidget(periods);
+  for (auto* box : {firstFrom_, firstTo_, secondFrom_, secondTo_})
+    connect(box, &QSpinBox::valueChanged, this, [this] { invalidate(); });
+  connect(periodDimension_, &QComboBox::currentIndexChanged, this, [this] { invalidate(); });
+  connect(periodMinimum_, &QSpinBox::valueChanged, this, [this] { renderPeriodComparison(); });
+  connect(periodView_, &QTableView::activated, this, [this](const QModelIndex& index) {
+    if (!index.isValid()) return;
+    drillSource_ = nullptr;
+    drillDown(index.data(IdsRole).value<QList<int>>(), index.data(NoteRole).toString());
+  });
   auto* taste = new StatsCard(tr("Find your favourites"),
                               tr("Explore genres, studios and formats by popularity in your list, "
                                  "personal rating or time spent."));
@@ -798,7 +932,8 @@ StatsWidget::StatsWidget(QWidget* parent) : PageWidget(parent) {
   auto* activityCard = new StatsCard(tr("Progress and rating history"),
                                      tr("Exact before-and-after values for edits made in Taiga. "
                                         "Your global filters apply here too."));
-  auto* activitySearch = new QLineEdit(activityCard);
+  auto* activitySearch = activitySearch_ = new QLineEdit(activityCard);
+  activitySearch->setObjectName("statsActivitySearch");
   activitySearch->setPlaceholderText(tr("Find a title in your activity…"));
   activitySearch->setAccessibleName(tr("Search local activity"));
   activitySearch->setClearButtonEnabled(true);
@@ -838,8 +973,9 @@ StatsWidget::StatsWidget(QWidget* parent) : PageWidget(parent) {
   selection_->setWordWrap(true);
   libraryBox->addWidget(selection_);
   auto* titleBar = new QHBoxLayout;
-  auto* back = new QPushButton(tr("Back to chart"), library);
+  auto* back = backToChart_ = new QPushButton(tr("Back to chart"), library);
   back->setObjectName("statsBackToChart");
+  back->setEnabled(false);
   titleBar->addWidget(back);
   search_ = new QLineEdit(library);
   search_->setObjectName("statsTitleSearch");
@@ -853,6 +989,11 @@ StatsWidget::StatsWidget(QWidget* parent) : PageWidget(parent) {
   titleBar->addWidget(all);
   titleBar->addWidget(exportButton);
   libraryBox->addLayout(titleBar);
+  titlesEmpty_ = new QLabel(library);
+  titlesEmpty_->setObjectName("statsTitlesEmpty");
+  titlesEmpty_->setWordWrap(true);
+  titlesEmpty_->hide();
+  libraryBox->addWidget(titlesEmpty_);
   titlesModel_ = new StatsTitlesModel(this);
   titlesProxy_ = new QSortFilterProxyModel(this);
   titlesProxy_->setSourceModel(titlesModel_);
@@ -876,16 +1017,37 @@ StatsWidget::StatsWidget(QWidget* parent) : PageWidget(parent) {
   tabs_->addTab(library, tr("Titles"));
   connect(search_, &QLineEdit::textChanged, titlesProxy_,
           &QSortFilterProxyModel::setFilterFixedString);
+  connect(titlesProxy_, &QAbstractItemModel::modelReset, this, &StatsWidget::updateTitleCount);
+  connect(titlesProxy_, &QAbstractItemModel::rowsInserted, this, &StatsWidget::updateTitleCount);
+  connect(titlesProxy_, &QAbstractItemModel::rowsRemoved, this, &StatsWidget::updateTitleCount);
+  connect(search_, &QLineEdit::textChanged, this, &StatsWidget::updateTitleCount);
   connect(all, &QPushButton::clicked, this, [this] {
     search_->clear();
     showTitles();
   });
   const auto returnToChart = [this] {
-    if (tabs_->currentIndex() != kTitlesTab) return;
+    if (tabs_->currentIndex() != kTitlesTab || !drilled_) return;
     tabs_->setCurrentIndex(previousTab_);
-    if (drillSource_) drillSource_->setFocus();
+    if (drillSource_)
+      drillSource_->setFocus();
+    else if (previousTab_ == 2)
+      periodView_->setFocus();
   };
   connect(back, &QPushButton::clicked, this, returnToChart);
+  auto* find = new QAction(this);
+  find->setShortcut(QKeySequence::Find);
+  find->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+  addAction(find);
+  connect(find, &QAction::triggered, this, [this] {
+    if (tabs_->currentIndex() == 4) {
+      activitySearch_->setFocus();
+      activitySearch_->selectAll();
+    } else {
+      tabs_->setCurrentIndex(kTitlesTab);
+      search_->setFocus();
+      search_->selectAll();
+    }
+  });
   auto* escape = new QAction(this);
   escape->setShortcut(QKeySequence(Qt::Key_Escape));
   escape->setShortcutContext(Qt::WidgetWithChildrenShortcut);
@@ -944,7 +1106,189 @@ StatsWidget::StatsWidget(QWidget* parent) : PageWidget(parent) {
   connect(&taiga::accounts, &taiga::Accounts::authenticationChanged, this,
           [this] { invalidate(); });
   connect(&stats::activity, &stats::ActivityLog::changed, this, [this] { invalidate(); });
+  updateSavedViews();
+  connect(savedViews_, &QComboBox::activated, this, [this](int index) {
+    if (index > 0) restoreView(QJsonObject::fromVariantMap(savedViews_->currentData().toMap()));
+    updateView_->setEnabled(index > 0);
+    deleteView_->setEnabled(index > 0);
+  });
+  connect(saveViewButton, &QPushButton::clicked, this, [this] {
+    bool ok = false;
+    const auto name = QInputDialog::getText(this, tr("Save statistics view"), tr("View name"),
+                                            QLineEdit::Normal, {}, &ok)
+                          .trimmed();
+    if (!ok) return;
+    bool exists = false;
+    for (int i = 1; i < savedViews_->count(); ++i) exists |= savedViews_->itemText(i) == name;
+    if (exists &&
+        QMessageBox::question(this, tr("Replace saved view?"),
+                              tr("Replace the saved view \"%1\"?").arg(name)) != QMessageBox::Yes)
+      return;
+    saveView(name);
+  });
+  connect(updateView_, &QPushButton::clicked, this,
+          [this] { saveView(savedViews_->currentText()); });
+  connect(deleteView_, &QPushButton::clicked, this, [this] {
+    const auto name = savedViews_->currentText();
+    if (savedViews_->currentIndex() <= 0 ||
+        QMessageBox::question(
+            this, tr("Delete saved view?"),
+            tr("Delete \"%1\"? Your list and account data are kept.").arg(name)) !=
+            QMessageBox::Yes)
+      return;
+    QJsonArray remaining;
+    for (const auto& item : taiga::session.statisticsViews())
+      if (item.toObject()["name"].toString() != name) remaining.append(item);
+    const bool saved = taiga::session.setStatisticsViews(remaining);
+    viewNotice_->setText(
+        saved ? tr("Deleted view \"%1\".").arg(name)
+              : tr("Could not delete the saved view. Check that Taiga's data folder is writable."));
+    viewNotice_->show();
+    if (saved) updateSavedViews();
+  });
+  restoreView(taiga::session.statisticsState());
+  connect(qApp, &QCoreApplication::aboutToQuit, this, &StatsWidget::saveState);
   manga::library.init();
+}
+
+QJsonObject StatsWidget::viewState() const {
+  QJsonObject state{
+      {"version", 1},
+      {"kind", kind_->currentIndex()},
+      {"tab", tabs_->currentIndex()},
+      {"filtersVisible", filterToggle_->isChecked()},
+      {"dimension", dimension_->currentData().toInt()},
+      {"ranking", ranking_->currentIndex()},
+      {"minimum", minimum_->value()},
+      {"allGroups", showAllGroups_->isChecked()},
+      {"timelineYear", timelineYear_->currentData().toString()},
+      {"periodDimension", periodDimension_->currentData().toInt()},
+      {"firstFrom", firstFrom_->value()},
+      {"firstTo", firstTo_->value()},
+      {"secondFrom", secondFrom_->value()},
+      {"secondTo", secondTo_->value()},
+      {"periodMinimum", periodMinimum_->value()},
+      {"titleSearch", search_->text()},
+      {"activitySearch", activitySearch_->text()},
+      {"titlesHeader",
+       QString::fromLatin1(titlesView_->horizontalHeader()->saveState().toBase64())},
+      {"activityHeader",
+       QString::fromLatin1(activityView_->horizontalHeader()->saveState().toBase64())},
+      {"periodHeader",
+       QString::fromLatin1(periodView_->horizontalHeader()->saveState().toBase64())}};
+  const QList<QComboBox*> filters{status_, format_, year_, genre_, studio_};
+  const QStringList names{"status", "format", "year", "genre", "studio"};
+  for (int i = 0; i < filters.size(); ++i) state[names[i]] = filters[i]->currentData().toString();
+  return state;
+}
+
+void StatsWidget::saveState() const {
+  if (!taiga::session.setStatisticsState(viewState()))
+    qWarning("Could not save statistics view state.");
+}
+
+void StatsWidget::hideEvent(QHideEvent* event) {
+  saveState();
+  PageWidget::hideEvent(event);
+}
+
+void StatsWidget::restoreView(const QJsonObject& state) {
+  if (state["version"].toInt() != 1) return;
+  const QSignalBlocker kindBlock(kind_);
+  kind_->setCurrentIndex(std::clamp(state["kind"].toInt(), 0, 1));
+  updateChoices(snapshot());
+  const QList<QComboBox*> filters{status_, format_, year_, genre_, studio_};
+  const QStringList names{"status", "format", "year", "genre", "studio"};
+  for (int i = 0; i < filters.size(); ++i) {
+    auto* box = filters[i];
+    const QSignalBlocker block(box);
+    const auto value = state[names[i]].toString();
+    if (box->findData(value) < 0) box->addItem(tr("%1 (unavailable)").arg(value), value);
+    box->setCurrentIndex(box->findData(value));
+  }
+  const auto restoreCombo = [&](QComboBox* box, const char* key) {
+    const QSignalBlocker block(box);
+    const int index = box->findData(state[key].toInt());
+    box->setCurrentIndex(std::max(0, index));
+  };
+  restoreCombo(dimension_, "dimension");
+  restoreCombo(periodDimension_, "periodDimension");
+  ranking_->setCurrentIndex(std::clamp(state["ranking"].toInt(), 0, kind_->currentIndex() ? 2 : 3));
+  minimum_->setValue(state["minimum"].toInt(5));
+  periodMinimum_->setValue(state["periodMinimum"].toInt(3));
+  for (const auto& [box, key] : QList<QPair<QSpinBox*, const char*>>{{firstFrom_, "firstFrom"},
+                                                                     {firstTo_, "firstTo"},
+                                                                     {secondFrom_, "secondFrom"},
+                                                                     {secondTo_, "secondTo"}}) {
+    const QSignalBlocker block(box);
+    box->setValue(state[key].toInt(box->value()));
+  }
+  showAllGroups_->setChecked(state["allGroups"].toBool());
+  filterToggle_->setChecked(state["filtersVisible"].toBool());
+  search_->setText(state["titleSearch"].toString());
+  activitySearch_->setText(state["activitySearch"].toString());
+  restoredTimelineYear_ = state["timelineYear"].toString();
+  for (const auto& [view, key] :
+       QList<QPair<QTableView*, const char*>>{{titlesView_, "titlesHeader"},
+                                              {activityView_, "activityHeader"},
+                                              {periodView_, "periodHeader"}}) {
+    const auto header = QByteArray::fromBase64(state[key].toString().toLatin1());
+    if (!header.isEmpty()) view->horizontalHeader()->restoreState(header);
+    view->sortByColumn(view->horizontalHeader()->sortIndicatorSection(),
+                       view->horizontalHeader()->sortIndicatorOrder());
+  }
+  drillSource_ = nullptr;
+  drilled_ = false;
+  drillIds_.clear();
+  drillLabel_.clear();
+  backToChart_->setEnabled(false);
+  tabs_->setCurrentIndex(std::clamp(state["tab"].toInt(), 0, tabs_->count() - 1));
+  viewNotice_->hide();
+  invalidate();
+}
+
+void StatsWidget::updateSavedViews(const QString& name) {
+  const QSignalBlocker block(savedViews_);
+  savedViews_->clear();
+  savedViews_->addItem(tr("Saved views"));
+  for (const auto& value : taiga::session.statisticsViews()) {
+    const auto entry = value.toObject();
+    const auto title = entry["name"].toString().trimmed();
+    const auto state = entry["state"].toObject();
+    if (!title.isEmpty() && title.size() <= 120 && state["version"].toInt() == 1)
+      savedViews_->addItem(title, state.toVariantMap());
+  }
+  int selected = 0;
+  for (int i = 1; i < savedViews_->count(); ++i)
+    if (savedViews_->itemText(i) == name) selected = i;
+  savedViews_->setCurrentIndex(selected);
+  updateView_->setEnabled(savedViews_->currentIndex() > 0);
+  deleteView_->setEnabled(savedViews_->currentIndex() > 0);
+}
+
+bool StatsWidget::saveView(const QString& name) {
+  const auto trimmed = name.trimmed();
+  if (trimmed.isEmpty() || trimmed.size() > 120) {
+    viewNotice_->setText(tr("Use a view name between 1 and 120 characters."));
+    viewNotice_->show();
+    return false;
+  }
+  auto views = taiga::session.statisticsViews();
+  const QJsonObject entry{{"name", trimmed}, {"state", viewState()}};
+  int existing = -1;
+  for (int i = 0; i < views.size(); ++i)
+    if (views[i].toObject()["name"].toString() == trimmed) existing = i;
+  if (existing >= 0)
+    views[existing] = entry;
+  else
+    views.append(entry);
+  const bool saved = taiga::session.setStatisticsViews(views);
+  viewNotice_->setText(
+      saved ? tr("Saved view \"%1\".").arg(trimmed)
+            : tr("Could not save the view. Check that Taiga's data folder is writable."));
+  viewNotice_->show();
+  if (saved) updateSavedViews(trimmed);
+  return saved;
 }
 
 QList<stats::Record> StatsWidget::snapshot() const {
@@ -1041,6 +1385,8 @@ void StatsWidget::updateChoices(const QList<stats::Record>& records) {
     box->clear();
     box->addItem(tr("All"), QString{});
     for (const auto& text : choices) box->addItem(text, text);
+    if (!old.isEmpty() && box->findData(old) < 0)
+      box->addItem(tr("%1 (unavailable)").arg(old), old);
     box->setCurrentIndex(std::max(0, box->findData(old)));
   }
 }
@@ -1049,6 +1395,8 @@ void StatsWidget::invalidate() {
   dirty_ = true;
   ++revision_;
   titlesView_->setEnabled(false);
+  activityView_->setEnabled(false);
+  periodView_->setEnabled(false);
   for (auto* chart : charts_) chart->setEnabled(false);
   if (isVisible()) debounce_.start();
 }
@@ -1070,23 +1418,31 @@ void StatsWidget::refresh() {
   overview_->setText(tr("Calculating statistics for %1 saved titles…").arg(count(records.size())));
   auto changes = stats::activity.records(kind_->currentIndex() ? stats::MediaKind::Manga
                                                                : stats::MediaKind::Anime);
-  QtConcurrent::run([records = std::move(records), changes = std::move(changes), filter] {
+  const stats::Period first{firstFrom_->value(), firstTo_->value()},
+      second{secondFrom_->value(), secondTo_->value()};
+  const auto dimension = stats::Dimension(periodDimension_->currentData().toInt());
+  QtConcurrent::run([records = std::move(records), changes = std::move(changes), filter, first,
+                     second, dimension] {
     auto summary = stats::calculate(records, filter);
     QSet<int> ids;
     for (const auto& record : summary.records) ids.insert(record.id);
     auto activity = stats::calculateActivity(changes, ids);
-    return std::make_pair(std::move(summary), std::move(activity));
-  }).then(this, [this, revision](std::pair<stats::Summary, stats::ActivitySummary> result) {
+    auto periods = stats::comparePeriods(summary.records, first, second, dimension);
+    return StatsResult{std::move(summary), std::move(activity), std::move(periods)};
+  }).then(this, [this, revision](StatsResult result) {
     calculating_ = false;
     if (revision != revision_) {
       debounce_.start();
       return;
     }
     dirty_ = false;
-    summary_ = std::move(result.first);
-    activitySummary_ = std::move(result.second);
+    summary_ = std::move(result.summary);
+    activitySummary_ = std::move(result.activity);
+    periodComparison_ = std::move(result.periods);
     render();
     titlesView_->setEnabled(true);
+    activityView_->setEnabled(true);
+    periodView_->setEnabled(true);
     for (auto* chart : charts_) chart->setEnabled(true);
   });
 }
@@ -1280,18 +1636,119 @@ void StatsWidget::render() {
   charts_[Below]->setRows(disagreements(below));
   renderGroups();
   const QSignalBlocker timelineBlock(timelineYear_);
-  const auto previousYear = timelineYear_->currentData().toString();
+  const auto previousYear = restoredTimelineYear_.isEmpty()
+                                ? timelineYear_->currentData().toString()
+                                : restoredTimelineYear_;
+  restoredTimelineYear_.clear();
   timelineYear_->clear();
   const auto years = s.groups.value(stats::Dimension::CompletionYear);
   for (auto it = years.crbegin(); it != years.crend(); ++it)
     if (it->name != "Unknown") timelineYear_->addItem(it->name, it->name);
   if (timelineYear_->count() == 0) timelineYear_->addItem(tr("No dated completions"), QString{});
   const int previousIndex = timelineYear_->findData(previousYear);
-  if (previousIndex >= 0) timelineYear_->setCurrentIndex(previousIndex);
+  if (previousIndex >= 0) {
+    timelineYear_->setCurrentIndex(previousIndex);
+  } else if (!previousYear.isEmpty()) {
+    timelineYear_->addItem(tr("%1 (no completions)").arg(previousYear), previousYear);
+    timelineYear_->setCurrentIndex(timelineYear_->count() - 1);
+  }
   renderTimeline();
   renderActivity();
-  search_->clear();
-  showTitles();
+  renderPeriodComparison();
+  showTitles(drillIds_, drillLabel_, !drilled_);
+}
+
+void StatsWidget::renderPeriodComparison() {
+  const auto& result = periodComparison_;
+  periodModel_->removeRows(0, periodModel_->rowCount());
+  periodView_->setVisible(result.valid && !result.groups.isEmpty());
+  if (!result.valid) {
+    periodNote_->setText(
+        tr("Choose two non-overlapping periods. Each start year must be no later "
+           "than its end year."));
+    return;
+  }
+  const auto firstLabel = tr("A: %1-%2").arg(firstFrom_->value()).arg(firstTo_->value());
+  const auto secondLabel = tr("B: %1-%2").arg(secondFrom_->value()).arg(secondTo_->value());
+  const auto mean = [](const stats::Group& group) {
+    return group.scored ? number(group.mean()) : StatsWidget::tr("Unrated");
+  };
+  QString note = tr("%1: %2 completed, %3 rated, mean %4. %5: %6 completed, %7 rated, mean %8.")
+                     .arg(firstLabel, count(result.first.ids.size()), count(result.first.scored),
+                          mean(result.first), secondLabel, count(result.second.ids.size()),
+                          count(result.second.scored), mean(result.second));
+  if (result.first.scored >= periodMinimum_->value() &&
+      result.second.scored >= periodMinimum_->value())
+    note += tr(" Mean score change: %1.").arg(number(result.second.mean() - result.first.mean()));
+  note +=
+      tr(" %1 completed titles have no usable finish year and are excluded. Global filters apply.")
+          .arg(count(result.missingDates));
+  if (result.first.ids.isEmpty() || result.second.ids.isEmpty())
+    note += tr(" No completed titles in one or both periods. Adjust the years or clear filters.");
+  else
+    note += tr(
+        " Share changes are percentage points, so different period sizes remain comparable. "
+        "Genres and studios can overlap. Double-click or press Enter on A or B to see its titles.");
+  periodNote_->setText(note);
+  const auto signedNumber = [](double value) {
+    return (value > 0 ? QStringLiteral("+") : QString{}) + number(value);
+  };
+  for (const auto& group : result.groups) {
+    const double firstShare =
+        result.first.ids.isEmpty() ? 0 : 100.0 * group.first.ids.size() / result.first.ids.size();
+    const double secondShare = result.second.ids.isEmpty()
+                                   ? 0
+                                   : 100.0 * group.second.ids.size() / result.second.ids.size();
+    const bool comparable = group.first.scored >= periodMinimum_->value() &&
+                            group.second.scored >= periodMinimum_->value();
+    const bool sharesComparable = !result.first.ids.isEmpty() && !result.second.ids.isEmpty();
+    const double delta = group.second.mean() - group.first.mean();
+    const QStringList text{
+        group.name,
+        tr("%1 / %2%").arg(count(group.first.ids.size()), number(firstShare)),
+        mean(group.first),
+        tr("%1 / %2%").arg(count(group.second.ids.size()), number(secondShare)),
+        mean(group.second),
+        sharesComparable ? signedNumber(secondShare - firstShare) + tr(" pp") : QStringLiteral("—"),
+        comparable ? signedNumber(delta) : QStringLiteral("—")};
+    QList<int> combined = group.first.ids;
+    combined.append(group.second.ids);
+    const QString details =
+        tr("%1\n%2: %3 titles, %4 rated, mean %5\n%6: %7 titles, %8 rated, mean %9\n"
+           "Score changes require at least %10 ratings in each period.")
+            .arg(group.name, firstLabel, count(group.first.ids.size()), count(group.first.scored),
+                 mean(group.first), secondLabel, count(group.second.ids.size()),
+                 count(group.second.scored), mean(group.second), count(periodMinimum_->value()));
+    QList<QStandardItem*> items;
+    for (int column = 0; column < text.size(); ++column) {
+      auto* item = new QStandardItem(text[column]);
+      const bool first = column == 1 || column == 2, second = column == 3 || column == 4;
+      item->setData(QVariant::fromValue(first    ? group.first.ids
+                                        : second ? group.second.ids
+                                                 : combined),
+                    IdsRole);
+      item->setData(tr("%1 / %2").arg(group.name, first    ? firstLabel
+                                                  : second ? secondLabel
+                                                           : firstLabel + ", " + secondLabel),
+                    NoteRole);
+      item->setToolTip(details);
+      item->setData(text[column] + ". " + details, Qt::AccessibleTextRole);
+      if (column == 0)
+        item->setData(group.name, Qt::UserRole);
+      else {
+        const double amount = column == 1   ? group.first.ids.size()
+                              : column == 2 ? (group.first.scored ? group.first.mean() : -1000)
+                              : column == 3 ? group.second.ids.size()
+                              : column == 4 ? (group.second.scored ? group.second.mean() : -1000)
+                              : column == 5 ? (sharesComparable ? secondShare - firstShare : -1000)
+                                            : (comparable ? delta : -1000);
+        item->setData(amount, Qt::UserRole);
+        item->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+      }
+      items.append(item);
+    }
+    periodModel_->appendRow(items);
+  }
 }
 
 void StatsWidget::renderGroups() {
@@ -1441,15 +1898,31 @@ void StatsWidget::renderActivity() {
 }
 
 void StatsWidget::showTitles(const QList<int>& ids, const QString& label, bool all) {
+  drilled_ = !all;
+  drillIds_ = all ? QList<int>{} : ids;
+  drillLabel_ = all ? QString{} : label;
+  backToChart_->setEnabled(drilled_);
   const QSet<int> selected(ids.begin(), ids.end());
   QList<stats::Record> rows;
   for (const auto& r : summary_.records)
     if (all || selected.contains(r.id)) rows.append(r);
   titlesModel_->setRows(std::move(rows));
-  selection_->setText(
-      tr("%1%2 titles. Double-click or press Enter to open a title.")
-          .arg(label.isEmpty() ? QString{} : label + "\n", count(titlesModel_->rowCount())));
-  tabs_->setTabText(kTitlesTab, tr("Titles (%1)").arg(count(titlesModel_->rowCount())));
+  updateTitleCount();
+}
+
+void StatsWidget::updateTitleCount() {
+  const auto visible = titlesProxy_->rowCount(), total = titlesModel_->rowCount();
+  const auto amount = visible == total ? tr("%1 titles").arg(count(total))
+                                       : tr("%1 of %2 titles").arg(count(visible), count(total));
+  selection_->setText((drillLabel_.isEmpty() ? QString{} : drillLabel_ + '\n') + amount +
+                      tr(". Double-click or press Enter to open a title."));
+  tabs_->setTabText(kTitlesTab, tr("Titles (%1)").arg(count(visible)));
+  titlesEmpty_->setText(
+      !search_->text().isEmpty()
+          ? tr("No titles match this search. Clear the search to see this selection.")
+          : tr("No titles in this selection. Choose All filtered titles or clear the global "
+               "filters."));
+  titlesEmpty_->setVisible(visible == 0);
 }
 void StatsWidget::drillDown(const QList<int>& ids, const QString& label) {
   if (tabs_->currentIndex() != kTitlesTab) previousTab_ = tabs_->currentIndex();

@@ -62,6 +62,7 @@ counterparts, `statistics-narrow.png` and `statistics-backlog.png` beside the ex
 `bin/RelWithDebInfo`. `statistics-main-window.png` also covers the actual sidebar and page
 styling. Fixtures include varied statuses, scores, dates, formats and studios.
 `grouped-list-check.png` covers the grouped layout and its existing columns.
+`statistics-taste-narrow.png` checks the completion-period comparison at a narrower width.
 
 ## What changed
 
@@ -91,6 +92,10 @@ HTTP failure/retry, edits made during a request, response timestamps and reading
 cache invalidation, statistics filtering/drill-down, manga row updates and usable background sync.
 The HTTP transport in the integration binary is compiled to redirect requests to loopback;
 it cannot send mutations to a live service. Production builds use the normal transport.
+
+The UI checks also cover saved-view persistence and restoration, period sample cutoffs and
+drilldowns, separate page searches, Back/Forward branching, and 30 selected-row view transitions
+per run. View-switch checks preserve both selected titles and the viewport anchor.
 
 Restored grouped list/season layouts and remaining v1 migration limits are documented in
 `FEATURE_GAPS.md`.

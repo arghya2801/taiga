@@ -35,6 +35,28 @@ QString Session::fileName() const {
   return u"%1/session.json"_s.arg(get_data_path());
 }
 
+QJsonObject Session::statisticsState() const {
+  return QJsonDocument::fromJson(value("statistics.state").toByteArray()).object();
+}
+
+QJsonArray Session::statisticsViews() const {
+  return QJsonDocument::fromJson(value("statistics.views").toByteArray()).array();
+}
+
+bool Session::setStatisticsState(const QJsonObject& state) const {
+  auto store = settings();
+  store.setValue("statistics.state", QJsonDocument(state).toJson(QJsonDocument::Compact));
+  store.sync();
+  return store.status() == QSettings::NoError;
+}
+
+bool Session::setStatisticsViews(const QJsonArray& views) const {
+  auto store = settings();
+  store.setValue("statistics.views", QJsonDocument(views).toJson(QJsonDocument::Compact));
+  store.sync();
+  return store.status() == QSettings::NoError;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 int Session::animeListSortColumn() const {

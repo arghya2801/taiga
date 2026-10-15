@@ -1,15 +1,19 @@
 // Real SQLite, model, queue and widget checks. All data is temporary and HTTP is loopback-only.
+#include <QAbstractButton>
 #include <QAction>
 #include <QComboBox>
 #include <QDateTime>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QHeaderView>
 #include <QImage>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QKeyEvent>
+#include <QLabel>
+#include <QLibrary>
 #include <QLineEdit>
 #include <QListView>
 #include <QMessageBox>
@@ -40,6 +44,7 @@
 // clang-format off
 #include <windows.h>
 #include <psapi.h>
+#include <dbghelp.h>
 // clang-format on
 #endif
 #include <QAbstractItemView>
@@ -79,6 +84,26 @@
 
 namespace {
 int failures = 0;
+#ifdef Q_OS_WIN
+void printFailureStack() {
+  const auto initialize =
+      reinterpret_cast<decltype(&SymInitialize)>(QLibrary::resolve("dbghelp", "SymInitialize"));
+  const auto fromAddress =
+      reinterpret_cast<decltype(&SymFromAddr)>(QLibrary::resolve("dbghelp", "SymFromAddr"));
+  if (!initialize || !fromAddress || !initialize(GetCurrentProcess(), nullptr, TRUE)) return;
+  void* frames[32];
+  const auto size = CaptureStackBackTrace(0, 32, frames, nullptr);
+  for (int i = 0; i < size; ++i) {
+    alignas(SYMBOL_INFO) char buffer[sizeof(SYMBOL_INFO) + 1024]{};
+    auto* symbol = reinterpret_cast<SYMBOL_INFO*>(buffer);
+    symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+    symbol->MaxNameLen = 1023;
+    DWORD64 offset = 0;
+    if (fromAddress(GetCurrentProcess(), DWORD64(frames[i]), &offset, symbol))
+      std::fprintf(stderr, "  %s + %llu\n", symbol->Name, offset);
+  }
+}
+#endif
 void check(bool ok, const char* label) {
   if (!ok) {
     ++failures;
@@ -305,6 +330,17 @@ public:
 }  // namespace
 
 int main(int argc, char* argv[]) {
+#ifdef Q_OS_WIN
+  _set_purecall_handler([] {
+    std::fprintf(stderr, "Pure virtual call:\n");
+    printFailureStack();
+  });
+  _set_invalid_parameter_handler(
+      [](const wchar_t*, const wchar_t*, const wchar_t*, unsigned, uintptr_t) {
+        std::fprintf(stderr, "Invalid parameter:\n");
+        printFailureStack();
+      });
+#endif
   std::setvbuf(stdout, nullptr, _IONBF, 0);
   std::setvbuf(stderr, nullptr, _IONBF, 0);
   qInstallMessageHandler([](QtMsgType type, const QMessageLogContext&, const QString& message) {
@@ -620,7 +656,145 @@ int main(int argc, char* argv[]) {
     matching += QString::fromStdString(a.titles.romaji).contains("Fullmetal");
   check(titles->model()->rowCount() == matching,
         "drilldown supports title search without rebuilding account statistics");
+  check(tabs->tabText(5).contains(QString::number(matching)),
+        "title counts reflect the current search instead of the unfiltered selection");
+  search->setText("does-not-exist-in-this-fixture");
+  check(!widget.findChild<QLabel*>("statsTitlesEmpty")->isHidden(),
+        "empty title searches explain how to recover");
   search->clear();
+  std::printf("Checking taste periods and saved views...\n");
+  auto* firstFrom = widget.findChild<QSpinBox*>("statsFirstFrom");
+  auto* firstTo = widget.findChild<QSpinBox*>("statsFirstTo");
+  auto* secondFrom = widget.findChild<QSpinBox*>("statsSecondFrom");
+  auto* secondTo = widget.findChild<QSpinBox*>("statsSecondTo");
+  auto* periodMinimum = widget.findChild<QSpinBox*>("statsPeriodMinimum");
+  auto* periodView = widget.findChild<QTableView*>("statsPeriodComparison");
+  firstFrom->setValue(2024);
+  firstTo->setValue(2024);
+  secondFrom->setValue(2025);
+  secondTo->setValue(2026);
+  periodMinimum->setValue(1);
+  tabs->setCurrentIndex(2);
+  check(waitFor([&] { return periodView->isEnabled() && periodView->model()->rowCount() > 0; }),
+        "taste periods calculate asynchronously for completed titles");
+  int dramaRow = -1, expectedFirst = 0, expectedSecond = 0;
+  for (int row = 0; row < periodView->model()->rowCount(); ++row)
+    if (periodView->model()->index(row, 0).data().toString() == "Drama") dramaRow = row;
+  for (const auto& entry : entries) {
+    if (entry.anime_id % 2 == 0 || entry.status != anime::list::Status::Completed) continue;
+    expectedFirst += entry.date_completed.year() == 2024;
+    expectedSecond += entry.date_completed.year() == 2025 || entry.date_completed.year() == 2026;
+  }
+  check(dramaRow >= 0 &&
+            periodView->model()
+                    ->index(dramaRow, 1)
+                    .data(Qt::UserRole + 4)
+                    .value<QList<int>>()
+                    .size() == expectedFirst &&
+            periodView->model()
+                    ->index(dramaRow, 3)
+                    .data(Qt::UserRole + 4)
+                    .value<QList<int>>()
+                    .size() == expectedSecond,
+        "taste comparison cells carry exact cohort IDs and exclude missing finish years");
+  periodMinimum->setValue(count + 1);
+  check(periodView->model()->index(dramaRow, 6).data().toString() == QString::fromUtf8("—"),
+        "score differences require enough rated samples on both sides");
+  periodMinimum->setValue(1);
+  if (dramaRow >= 0) {
+    const auto index = periodView->model()->index(dramaRow, 3);
+    QMetaObject::invokeMethod(periodView, "activated", Qt::DirectConnection,
+                              Q_ARG(QModelIndex, index));
+    check(tabs->currentIndex() == 5 && titles->model()->rowCount() == expectedSecond,
+          "a comparison period opens only its contributing titles");
+    anime::db.updateEntry(entries.front());
+    check(waitFor([&] { return titles->isEnabled(); }) &&
+              titles->model()->rowCount() == expectedSecond,
+          "refreshing statistics preserves the current chart drilldown");
+    widget.findChild<QPushButton*>("statsBackToChart")->click();
+    check(tabs->currentIndex() == 2, "comparison drilldown returns to Taste");
+  }
+  secondFrom->setValue(2024);
+  check(waitFor([&] { return periodView->isEnabled(); }) && periodView->model()->rowCount() == 0 &&
+            widget.findChild<QLabel*>("statsPeriodNote")->text().contains("non-overlapping"),
+        "overlapping periods show an actionable message instead of misleading differences");
+  secondFrom->setValue(2025);
+  genre->setCurrentIndex(genre->findData("Drama"));
+  ranking->setCurrentIndex(1);
+  minimum->setValue(1);
+  search->setText("Monster");
+  titles->sortByColumn(4, Qt::DescendingOrder);
+  periodView->sortByColumn(6, Qt::AscendingOrder);
+  periodView->setColumnWidth(0, 175);
+  widget.findChild<QPushButton*>("statsFilterToggle")->setChecked(true);
+  check(waitFor([&] { return periodView->isEnabled(); }), "saved view waits for current filters");
+  check(!widget.saveView("  ") && !widget.saveView(QString(121, 'x')),
+        "saved view names reject empty and oversized names");
+  check(widget.saveView("Drama across years") && widget.saveView("Drama across years") &&
+            taiga::Session{}.statisticsViews().size() == 1,
+        "saved views persist and updating an existing name does not duplicate it");
+  genre->setCurrentIndex(0);
+  ranking->setCurrentIndex(0);
+  firstFrom->setValue(2000);
+  periodView->sortByColumn(1, Qt::DescendingOrder);
+  periodView->setColumnWidth(0, 140);
+  search->clear();
+  tabs->setCurrentIndex(0);
+  auto* savedViews = widget.findChild<QComboBox*>("statsSavedViews");
+  savedViews->setCurrentIndex(savedViews->findText("Drama across years"));
+  QMetaObject::invokeMethod(savedViews, "activated", Qt::DirectConnection,
+                            Q_ARG(int, savedViews->currentIndex()));
+  check(
+      waitFor([&] { return titles->isEnabled(); }) && genre->currentData().toString() == "Drama" &&
+          ranking->currentIndex() == 1 && firstFrom->value() == 2024 && tabs->currentIndex() == 2 &&
+          search->text() == "Monster" && titles->horizontalHeader()->sortIndicatorSection() == 4 &&
+          periodView->horizontalHeader()->sortIndicatorSection() == 6 &&
+          periodView->columnWidth(0) == 175,
+      "saved views restore filters, ranking, periods, searches and table sort");
+  widget.saveState();
+  {
+    gui::StatsWidget restored(nullptr);
+    restored.setAttribute(Qt::WA_DontShowOnScreen);
+    restored.show();
+    auto* restoredTitles = restored.findChild<QTableView*>("statsTitles");
+    check(waitFor([&] { return restoredTitles->isEnabled(); }) &&
+              restored.findChild<QComboBox*>("statsGenre")->currentData().toString() == "Drama" &&
+              restored.findChild<QLineEdit*>("statsTitleSearch")->text() == "Monster" &&
+              restored.findChild<QTabWidget*>("statsTabs")->currentIndex() == 2,
+          "a new statistics widget restores the last view from the session file");
+    restored.hide();
+  }
+  const auto lastView = taiga::session.statisticsState();
+  auto unavailable = lastView;
+  unavailable["genre"] = "Missing fixture genre";
+  taiga::session.setStatisticsState(unavailable);
+  {
+    gui::StatsWidget restored(nullptr);
+    restored.setAttribute(Qt::WA_DontShowOnScreen);
+    restored.show();
+    auto* restoredTitles = restored.findChild<QTableView*>("statsTitles");
+    check(waitFor([&] { return restoredTitles->isEnabled(); }) &&
+              restoredTitles->model()->rowCount() == 0 &&
+              restored.findChild<QComboBox*>("statsGenre")->currentData().toString() ==
+                  "Missing fixture genre",
+          "a saved filter missing from this account stays selected instead of silently broadening");
+    restored.hide();
+  }
+  taiga::session.setStatisticsState(lastView);
+  QTimer::singleShot(0, [] {
+    if (auto* dialog = qobject_cast<QMessageBox*>(QApplication::activeModalWidget()))
+      dialog->button(QMessageBox::Yes)->click();
+  });
+  widget.findChild<QPushButton*>("statsDeleteView")->click();
+  check(taiga::session.statisticsViews().isEmpty() && savedViews->count() == 1,
+        "deleting a saved view preserves the account and removes only the preset");
+  genre->setCurrentIndex(0);
+  search->clear();
+  ranking->setCurrentIndex(0);
+  minimum->setValue(5);
+  widget.findChild<QPushButton*>("statsFilterToggle")->setChecked(false);
+  check(waitFor([&] { return titles->isEnabled() && titles->model()->rowCount() == count; }),
+        "clearing saved filters restores all titles");
   tabs->setCurrentIndex(0);
   clock.restart();
   for (int i = 0; i < 30; ++i) {
@@ -637,6 +811,9 @@ int main(int argc, char* argv[]) {
       for (int tab = 0; tab < 5; ++tab) {
         tabs->setCurrentIndex(tab);
         QCoreApplication::processEvents();
+        if (auto* area = qobject_cast<QScrollArea*>(tabs->widget(tab)))
+          area->verticalScrollBar()->setValue(0);
+        QCoreApplication::processEvents();
         widget.grab().save(base + QString("/statistics-%1-%2.png").arg(themeName).arg(tab));
       }
     }
@@ -647,6 +824,13 @@ int main(int argc, char* argv[]) {
     QCoreApplication::sendPostedEvents(nullptr, QEvent::LayoutRequest);
     QCoreApplication::processEvents();
     widget.grab().save(base + "/statistics-narrow.png");
+    tabs->setCurrentIndex(2);
+    QCoreApplication::processEvents();
+    auto* tasteArea = qobject_cast<QScrollArea*>(tabs->widget(2));
+    tasteArea->verticalScrollBar()->setValue(0);
+    QCoreApplication::processEvents();
+    widget.grab().save(base + "/statistics-taste-narrow.png");
+    tabs->setCurrentIndex(0);
     auto* area = qobject_cast<QScrollArea*>(tabs->widget(0));
     area->verticalScrollBar()->setValue(area->verticalScrollBar()->maximum());
     QCoreApplication::processEvents();
@@ -659,12 +843,35 @@ int main(int argc, char* argv[]) {
     std::printf("Peak working set: %.2f MiB\n", memory.PeakWorkingSetSize / 1048576.0);
 #endif
   widget.hide();
+  taiga::session.setStatisticsState({});
   std::printf("Checking main window...\n");
   app.initWindowForChecks();
   auto* main = app.mainWindow();
   main->setAttribute(Qt::WA_DontShowOnScreen);
   main->resize(1180, 850);
   main->show();
+  std::printf("Checking page navigation...\n");
+  auto* navigation = main->findChild<gui::NavigationController*>();
+  main->navigateTo(gui::MainWindowPage::List);
+  main->searchBox()->setText("Monster");
+  main->navigateTo(gui::MainWindowPage::Manga);
+  check(main->searchBox()->text().isEmpty(), "each page starts with its own search text");
+  main->searchBox()->setText("Manga");
+  main->navigateTo(gui::MainWindowPage::List);
+  check(main->searchBox()->text() == "Monster", "returning to a page restores its search text");
+  main->navigateTo(gui::MainWindowPage::Stats);
+  check(!main->searchBox()->isEnabled(), "statistics uses its own search controls");
+  navigation->goBack();
+  check(main->searchBox()->text() == "Monster", "Back restores the previous page and its query");
+  navigation->goBack();
+  check(main->searchBox()->text() == "Manga", "history retains repeated visits to the same page");
+  main->navigateTo(gui::MainWindowPage::History);
+  check(!main->findChild<QAction*>("actionForward")->isEnabled(),
+        "a new visit after Back discards the obsolete forward branch");
+  main->navigateTo(gui::MainWindowPage::Manga);
+  main->searchBox()->clear();
+  main->navigateTo(gui::MainWindowPage::List);
+  main->searchBox()->clear();
   main->navigateTo(gui::MainWindowPage::Stats);
   auto* mainStats = main->findChild<gui::StatsWidget*>();
   auto* mainTitles = mainStats ? mainStats->findChild<QTableView*>("statsTitles") : nullptr;
@@ -708,18 +915,56 @@ int main(int argc, char* argv[]) {
   auto* listPage = main->findChild<gui::ListWidget*>();
   check(listPage != nullptr, "main anime list page exists");
   if (listPage) {
-    for (auto mode :
-         {gui::ListViewMode::Cards, gui::ListViewMode::List, gui::ListViewMode::Grouped}) {
-      if (auto* previous = listPage->findChild<QAbstractItemView*>())
-        if (previous->model()->rowCount())
-          previous->setCurrentIndex(previous->model()->index(0, 0));
-      listPage->setViewMode(mode);
-      QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
-    }
+    for (int cycle = 0; cycle < 10; ++cycle)
+      for (auto mode :
+           {gui::ListViewMode::Cards, gui::ListViewMode::List, gui::ListViewMode::Grouped}) {
+        if (auto* previous = listPage->findChild<QAbstractItemView*>())
+          if (previous->model()->rowCount())
+            previous->setCurrentIndex(previous->model()->index(0, 0));
+        auto* previous = listPage->findChild<QAbstractItemView*>();
+        const auto* selectedItem = previous->currentIndex()
+                                       .data(int(gui::AnimeListItemDataRole::Anime))
+                                       .value<const Anime*>();
+        const int selected = selectedItem ? selectedItem->id : 0;
+        if (previous->model()->rowCount() > 1)
+          previous->selectionModel()->select(
+              previous->model()->index(1, 0),
+              QItemSelectionModel::Select | QItemSelectionModel::Rows);
+        listPage->setViewMode(mode);
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        auto* current = listPage->findChild<QAbstractItemView*>();
+        const auto* currentItem = current->currentIndex()
+                                      .data(int(gui::AnimeListItemDataRole::Anime))
+                                      .value<const Anime*>();
+        check(
+            currentItem && currentItem->id == selected &&
+                current->selectionModel()->selectedRows().size() == 2,
+            "switching between cards, list and groups preserves current title and multiselection");
+      }
     check(listPage->findChildren<gui::ListViewBase*>().size() == 1,
           "changing list modes destroys old search handlers along with their views");
     auto* view = listPage->findChild<gui::ListView*>();
     auto* grouped = qobject_cast<gui::AnimeListProxyModel*>(view->model());
+    if (grouped->rowCount() > 4) {
+      view->scrollTo(grouped->index(4, 0), QAbstractItemView::PositionAtTop);
+      const gui::ListViewSelection before(view, grouped);
+      listPage->setViewMode(gui::ListViewMode::Cards);
+      QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+      QCoreApplication::processEvents();
+      auto* cards = listPage->findChild<QAbstractItemView*>();
+      check(before.top.isValid() && cards->visualRect(grouped->mapFromSource(before.top))
+                                        .intersects(cards->viewport()->rect()),
+            "switching to cards keeps the previous top title visible after layout");
+      const gui::ListViewSelection cardState(cards, grouped);
+      check(cardState.top.isValid(), "card spacing does not erase the viewport anchor");
+      listPage->setViewMode(gui::ListViewMode::Grouped);
+      QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+      QCoreApplication::processEvents();
+      view = listPage->findChild<gui::ListView*>();
+      check(view->visualRect(grouped->mapFromSource(cardState.top))
+                .intersects(view->viewport()->rect()),
+            "switching back to grouped rows keeps the card viewport anchor visible");
+    }
     grouped->setListStatusFilter({.status = 0, .anyStatus = true});
     grouped->setTextFilter("");
     grouped->sort(gui::AnimeListModel::COLUMN_SCORE, Qt::DescendingOrder);
@@ -749,6 +994,11 @@ int main(int argc, char* argv[]) {
     check(doubleClicks == 0, "group headings cannot activate the title below them");
     std::printf("Checking list keyboard actions...\n");
     view->setCurrentIndex(grouped->index(0, 0));
+    QKeyEvent playbackShortcut(QEvent::ShortcutOverride, Qt::Key_N, Qt::ControlModifier);
+    playbackShortcut.ignore();
+    QCoreApplication::sendEvent(view, &playbackShortcut);
+    check(playbackShortcut.isAccepted(),
+          "list playback keys take priority over the window's general playback shortcuts");
     auto* entry = grouped->index(0, 0)
                       .data(int(gui::AnimeListItemDataRole::ListEntry))
                       .value<const ListEntry*>();

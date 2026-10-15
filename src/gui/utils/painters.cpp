@@ -43,7 +43,8 @@ void paintEmptyListText(QAbstractScrollArea* area, const QString& text) {
     return font;
   }());
 
-  painter.drawText(area->viewport()->rect(), Qt::AlignCenter, text);
+  painter.drawText(area->viewport()->rect().adjusted(16, 16, -16, -16),
+                   Qt::AlignCenter | Qt::TextWordWrap, text);
 }
 
 void paintProgressBar(QPainter* painter, const QStyleOption& option, const Anime* anime,
@@ -59,8 +60,8 @@ void paintProgressBar(QPainter* painter, const QStyleOption& option, const Anime
   paintProgressBar(painter, option, entry->watched_episodes, total, aired, anime->id);
 }
 
-void paintProgressBar(QPainter* painter, const QStyleOption& option, int done, int total,
-                      int aired, int animeId) {
+void paintProgressBar(QPainter* painter, const QStyleOption& option, int done, int total, int aired,
+                      int animeId) {
   done = std::clamp(done, 0, total > 0 ? total : std::numeric_limits<int>::max());
   const auto text = u"%1/%2"_s.arg(done).arg(formatNumber(total, "?"));
   // Same ratio as `anime::list::getProgressRatio`: unknown totals show a mostly-full bar.
@@ -94,9 +95,9 @@ void paintProgressBar(QPainter* painter, const QStyleOption& option, int done, i
       const auto color = theme.color(Theme::Color::Available);
       for (int number = done + 1; number <= total; ++number) {
         if (!track::availableEpisodes.contains(animeId, number)) continue;
-        painter->fillRect(QRectF{bar.left() + (number - 1) * step, bar.bottom() - 3,
-                                 std::max(step - 1, 1.5), 3},
-                          color);
+        painter->fillRect(
+            QRectF{bar.left() + (number - 1) * step, bar.bottom() - 3, std::max(step - 1, 1.5), 3},
+            color);
       }
     }
   } else {

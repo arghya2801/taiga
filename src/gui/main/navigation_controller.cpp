@@ -20,6 +20,8 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QKeyEvent>
+#include <QLineEdit>
 #include <QMouseEvent>
 #include <QSignalBlocker>
 
@@ -68,9 +70,25 @@ void NavigationController::navigateToListStatus(anime::list::Status status) {
 }
 
 void NavigationController::applyPage(MainWindowPage page, bool addToHistory) {
+  auto* search = m_mainWindow->searchBox();
+  const auto previous =
+      static_cast<MainWindowPage>(m_mainWindow->ui()->stackedWidget->currentIndex());
+  searchTexts_[previous] = search->text();
   m_mainWindow->initPage(page);
   m_mainWindow->statusBarController()->clearMessage(StatusBarController::Source::Selection);
   m_mainWindow->ui()->stackedWidget->setCurrentIndex(static_cast<int>(page));
+  search->setText(searchTexts_.value(page));
+  const bool searchable = page == MainWindowPage::List || page == MainWindowPage::Search ||
+                          page == MainWindowPage::Manga || page == MainWindowPage::Torrents;
+  search->setEnabled(searchable);
+  search->setPlaceholderText(
+      page == MainWindowPage::List       ? tr("Filter anime titles...")
+      : page == MainWindowPage::Search   ? tr("Search anime, then press Enter...")
+      : page == MainWindowPage::Manga    ? tr("Filter manga, or press Enter to search MAL...")
+      : page == MainWindowPage::Torrents ? tr("Search torrents, then press Enter...")
+                                         : tr("Use this page's own controls"));
+  search->setAccessibleName(search->placeholderText());
+  search->setToolTip(searchable ? tr("Search this page (Ctrl+F)") : search->placeholderText());
 
   if (addToHistory) recordPageHistory(page);
 }
@@ -92,7 +110,8 @@ void NavigationController::goForward() {
 void NavigationController::recordPageHistory(MainWindowPage page) {
   if (m_pageHistoryIndex >= 0 && m_pageHistory.at(m_pageHistoryIndex) == page) return;
 
-  m_pageHistory.removeAll(page);
+  // A new visit after Back replaces the forward branch, like a browser.
+  while (m_pageHistory.size() > m_pageHistoryIndex + 1) m_pageHistory.removeLast();
   m_pageHistory.append(page);
   m_pageHistoryIndex = m_pageHistory.size() - 1;
 
@@ -106,6 +125,16 @@ void NavigationController::updateHistoryActions() {
 
 bool NavigationController::eventFilter(QObject* watched, QEvent* event) {
   const auto type = event->type();
+  if (type == QEvent::KeyPress) {
+    const auto* key = static_cast<QKeyEvent*>(event);
+    const auto* widget = qobject_cast<QWidget*>(watched);
+    if (widget && widget->window() == m_mainWindow && key->matches(QKeySequence::Find) &&
+        m_mainWindow->searchBox()->isEnabled()) {
+      m_mainWindow->searchBox()->setFocus();
+      m_mainWindow->searchBox()->selectAll();
+      return true;
+    }
+  }
   if (type != QEvent::MouseButtonPress && type != QEvent::MouseButtonRelease) {
     return QObject::eventFilter(watched, event);
   }

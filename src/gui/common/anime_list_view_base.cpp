@@ -24,6 +24,7 @@
 #include <QKeyEvent>
 #include <QLineEdit>
 #include <QListView>
+#include <QTimer>
 #include <QTreeView>
 #include <QUrl>
 #include <limits>
@@ -48,14 +49,64 @@
 
 namespace gui {
 
+ListViewSelection::ListViewSelection(QAbstractItemView* view, AnimeListProxyModel* proxy) {
+  if (!view) return;
+  QSet<int> seen;
+  for (const auto& row : view->selectionModel()->selectedIndexes()) {
+    const QPersistentModelIndex source(proxy->mapToSource(row.siblingAtColumn(0)));
+    if (source.isValid() && !seen.contains(source.row())) {
+      seen.insert(source.row());
+      rows.append(source);
+    }
+  }
+  current = proxy->mapToSource(view->currentIndex());
+  // Card spacing can leave the viewport's corner outside every item.
+  for (int y = 0; view->model()->rowCount() > 0 && y < view->viewport()->height() && !top.isValid();
+       y += 8)
+    for (int x = 0; x < view->viewport()->width(); x += 8) {
+      const auto index = view->indexAt(QPoint(x, y));
+      if (index.isValid()) {
+        top = proxy->mapToSource(index.siblingAtColumn(0));
+        break;
+      }
+    }
+  focused = view->hasFocus();
+}
+
+void ListViewSelection::restore(QAbstractItemView* view, AnimeListProxyModel* proxy) const {
+  if (!view) return;
+  QItemSelection selection;
+  for (const auto& row : rows) {
+    const auto mapped = proxy->mapFromSource(row);
+    if (mapped.isValid()) selection.select(mapped, mapped);
+  }
+  view->selectionModel()->select(selection,
+                                 QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+  view->selectionModel()->setCurrentIndex(proxy->mapFromSource(current),
+                                          QItemSelectionModel::NoUpdate);
+  if (top.isValid()) {
+    const auto anchor = top;
+    if (auto* callbacks = view->findChild<ListViewBase*>())
+      QTimer::singleShot(0, callbacks, [view, proxy, anchor] {
+        if (anchor.isValid())
+          view->scrollTo(proxy->mapFromSource(anchor), QAbstractItemView::PositionAtTop);
+      });
+  }
+  if (focused) view->setFocus();
+}
+
 ListViewBase::ListViewBase(QWidget*, QAbstractItemView* view, AnimeListModel* model,
                            AnimeListProxyModel* proxyModel, AnimeListContext context)
     : QObject(view), m_view(view), m_model(model), m_proxyModel(proxyModel), m_context(context) {
+  m_view->setAccessibleName(context == AnimeListContext::Search ? tr("Anime search results")
+                                                                : tr("Anime list"));
   m_view->setContextMenuPolicy(Qt::CustomContextMenu);
+  m_view->installEventFilter(this);
   m_view->setSelectionMode(QAbstractItemView::SelectionMode::ExtendedSelection);
 
   m_proxyModel->setSourceModel(m_model);
   m_view->setModel(m_proxyModel);
+  m_proxyModel->setTextFilter(mainWindow()->searchBox()->text());
 
   connect(mainWindow()->searchBox(), &QLineEdit::textChanged, this, &ListViewBase::filterByText);
 
@@ -70,7 +121,30 @@ ListViewBase::ListViewBase(QWidget*, QAbstractItemView* view, AnimeListModel* mo
           &ListViewBase::updateSelectionStatus, Qt::QueuedConnection);
 }
 
+bool ListViewBase::eventFilter(QObject* watched, QEvent* event) {
+  if (watched == m_view && event->type() == QEvent::ShortcutOverride) {
+    const auto* key = static_cast<QKeyEvent*>(event);
+    if (key->modifiers() == Qt::ControlModifier &&
+        (key->key() == Qt::Key_N || key->key() == Qt::Key_R) && m_view->currentIndex().isValid()) {
+      event->accept();
+      return true;
+    }
+  }
+  return QObject::eventFilter(watched, event);
+}
+
+QString ListViewBase::emptyText() const {
+  if (!m_proxyModel->filters().text.isEmpty())
+    return tr("No titles match your search. Clear the search or adjust the filters.");
+  return m_context == AnimeListContext::Search
+             ? tr("No results. Adjust the search or filters, then press Enter to search %1.")
+                   .arg(sync::serviceName(sync::currentServiceId()))
+             : tr("No titles in this category. Choose another list status or synchronize your "
+                  "list.");
+}
+
 void ListViewBase::filterByText(const QString& text) {
+  if (!m_view->isVisible()) return;
   m_proxyModel->setTextFilter(text);
 }
 

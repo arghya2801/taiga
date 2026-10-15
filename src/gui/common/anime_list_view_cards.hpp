@@ -35,7 +35,7 @@ class ListViewCards final : public QListView {
 public:
   ListViewCards(QWidget* parent, AnimeListModel* model, AnimeListProxyModel* proxyModel,
                 AnimeListContext context);
-  ~ListViewCards() = default;
+  ~ListViewCards() override;
 
   ListViewBase* baseView() {
     return m_base;

@@ -140,4 +140,14 @@ and local activity history are implemented. Non-MAL XML export refuses to substi
 provider's numeric IDs for MAL IDs. Legacy client-specific download-location automation,
 mIRC/Twitter, and recognition options marked Skipped above remain outside the supported workflows.
 
+### Taste comparisons and usability, October 15, 2026
+
+- Taste compares genres, studios/authors and formats across two completion-year ranges, with
+  counts, period shares, current mean ratings, sample cutoffs and exact-title drilldowns.
+- Named statistics views restore filters, ranking, period settings, searches, table layouts
+  and the selected page. The last statistics setup is restored on the next launch.
+- Main pages retain separate search text. Back/Forward preserves repeated visits and replaces
+  the forward branch after a new visit. List/card/group switches retain selection and position.
+- Empty list and title-search results explain how to recover. Ctrl+F targets the active page.
+
 Local large-list measurements and reproduction commands are in [docs/performance.md](docs/performance.md).

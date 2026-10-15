@@ -37,6 +37,15 @@ enum class ListViewMode {
   Grouped,
 };
 
+// Source indexes survive a proxy regrouping when switching between list and cards.
+struct ListViewSelection {
+  ListViewSelection(QAbstractItemView* view, AnimeListProxyModel* proxy);
+  void restore(QAbstractItemView* view, AnimeListProxyModel* proxy) const;
+  QList<QPersistentModelIndex> rows;
+  QPersistentModelIndex current, top;
+  bool focused = false;
+};
+
 class ListViewBase final : public QObject {
   Q_OBJECT
   Q_DISABLE_COPY_MOVE(ListViewBase)
@@ -46,10 +55,14 @@ public:
                AnimeListProxyModel* proxyModel, AnimeListContext context);
   ~ListViewBase() = default;
   bool handleKey(QKeyEvent* event);
+  QString emptyText() const;
 
   AnimeListContext context() const {
     return m_context;
   }
+
+protected:
+  bool eventFilter(QObject* watched, QEvent* event) override;
 
 public slots:
   void filterByText(const QString& text);

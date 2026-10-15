@@ -86,6 +86,11 @@ ListView::ListView(QWidget* parent, AnimeListModel* model, AnimeListProxyModel* 
           qOverload<const QModelIndex&>(&QAbstractItemView::edit));
 }
 
+ListView::~ListView() {
+  // Shared callbacks must disconnect before the view's base classes tear down selection.
+  delete m_base;
+}
+
 void ListView::keyPressEvent(QKeyEvent* event) {
   if (m_base->handleKey(event)) {
     event->accept();
@@ -128,7 +133,7 @@ void ListView::mouseDoubleClickEvent(QMouseEvent* event) {
 
 void ListView::paintEvent(QPaintEvent* event) {
   if (model() && model()->rowCount() == 0) {
-    paintEmptyListText(this, tr("No items found."));
+    paintEmptyListText(this, m_base->emptyText());
   }
 
   QTreeView::paintEvent(event);

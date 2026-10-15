@@ -36,6 +36,7 @@ AniList and Kitsu accounts still work for anime. Manga is MyAnimeList only.
 **Everything else**
 - **Statistics:** a chart dashboard with Overview, Ratings, Taste, Timeline, Activity and Titles pages.
   Explore MAL score comparisons, genre/studio rankings, completion history, backlog and repeats.
+  Compare taste across completion periods and save named views of filters, rankings and settings.
   Click a bar to inspect its titles; filter, search and export the selection. Charts support
   keyboard navigation and reflow in narrower windows. [Statistics guide](docs/statistics.md).
 - **List workflows:** choose Grouped from the View menu for status groups, or use the season
@@ -43,6 +44,7 @@ AniList and Kitsu accounts still work for anime. Manga is MyAnimeList only.
   the configured double-click action; Delete confirms removal; Ctrl+C copies titles;
   Ctrl+plus/minus changes current progress; Ctrl+0 through Ctrl+9 sets selected scores;
   Ctrl+O opens a folder, Ctrl+N plays next and Ctrl+R plays a random episode.
+  View switches preserve selection. Each main page keeps its own search; Ctrl+F focuses search.
 - **Seasons:** one click to the previous, current or next season on the Search page.
 - **Torrents:** RSS feeds and search, with v1's filter system (discard, select, prefer) and
   optional auto-download.

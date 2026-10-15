@@ -214,6 +214,7 @@ MangaWidget::MangaWidget(QWidget* parent)
 
   auto* searchBox = mainWindow()->searchBox();
   connect(searchBox, &QLineEdit::textChanged, this, [this](const QString& text) {
+    if (!isVisible()) return;
     if (showingResults_ && text.isEmpty()) {
       showingResults_ = false;
       populate();

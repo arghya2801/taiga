@@ -89,6 +89,22 @@ Summary calculate(const QList<Record>& records, const Filter& filter = {},
                   QDate today = QDate::currentDate());
 QStringList keys(const Record& record, Dimension dimension);
 
+struct Period {
+  int from = 0, to = 0;
+};
+struct ComparedGroup {
+  QString name;
+  Group first, second;
+};
+struct PeriodComparison {
+  Group first, second;
+  QList<ComparedGroup> groups;
+  int missingDates = 0;
+  bool valid = false;
+};
+PeriodComparison comparePeriods(const QList<Record>& records, Period first, Period second,
+                                Dimension dimension);
+
 struct ActivityChange {
   qint64 id = 0;
   int mediaId = 0;

@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include <QHash>
 #include <QList>
 #include <QObject>
 
@@ -69,6 +70,7 @@ private:
 
   QList<MainWindowPage> m_pageHistory;
   int m_pageHistoryIndex = -1;
+  QHash<MainWindowPage, QString> searchTexts_;
 };
 
 }  // namespace gui

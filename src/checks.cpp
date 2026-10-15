@@ -217,6 +217,48 @@ void checkStatistics() {
         "unknown totals retain observed repeat progress without inventing earlier passes");
 }
 
+void checkPeriodComparison() {
+  stats::Record a;
+  a.id = 1;
+  a.status = "Completed";
+  a.completionYear = "2020";
+  a.score = 8;
+  a.genres = {"Drama", "Drama", "Action"};
+  auto b = a;
+  b.id = 2;
+  b.completionYear = "2025";
+  b.score = 6;
+  auto unrated = b;
+  unrated.id = 3;
+  unrated.score = 0;
+  auto missing = b;
+  missing.id = 4;
+  missing.completionYear.clear();
+  auto watching = b;
+  watching.id = 5;
+  watching.status = "Watching";
+  auto outside = b;
+  outside.id = 6;
+  outside.completionYear = "2018";
+  const auto result = stats::comparePeriods({a, b, unrated, missing, watching, outside, a},
+                                            {2020, 2020}, {2021, 2025}, stats::Dimension::Genre);
+  check(
+      result.valid && result.first.ids == QList<int>{1} && result.second.ids == QList<int>({2, 3}),
+      "period comparison includes boundary years and deduplicates completed titles");
+  check(result.first.mean() == 8 && result.second.mean() == 6 && result.second.scored == 1 &&
+            result.missingDates == 1,
+        "period means exclude unrated titles and report missing finish years");
+  check(result.groups.size() == 2 && result.groups[1].first.ids.size() == 1 &&
+            result.groups[1].second.ids.size() == 2,
+        "period genre groups retain exact contributing IDs without duplicate genres");
+  check(!stats::comparePeriods({a}, {2020, 2022}, {2022, 2025}, stats::Dimension::Genre).valid &&
+            !stats::comparePeriods({a}, {2022, 2020}, {2023, 2025}, stats::Dimension::Genre).valid,
+        "overlapping and inverted completion periods are rejected");
+  check(stats::comparePeriods({}, {2020, 2020}, {2025, 2025}, stats::Dimension::Studio)
+            .groups.isEmpty(),
+        "empty completion comparisons remain empty");
+}
+
 void checkActivity() {
   const QDateTime time(QDate(2026, 10, 15), QTime(12, 0));
   stats::ActivityChange a{1, 1, time, 2, 5, 7, 8};
@@ -356,6 +398,7 @@ int main(int argc, char* argv[]) {
   checkAtf();
   checkFeedFilters();
   checkStatistics();
+  checkPeriodComparison();
   checkActivity();
   checkMangaIo();
   checkQueries();

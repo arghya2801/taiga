@@ -46,6 +46,10 @@ ListViewCards::ListViewCards(QWidget* parent, AnimeListModel* model,
   setWordWrap(true);
 }
 
+ListViewCards::~ListViewCards() {
+  delete m_base;
+}
+
 void ListViewCards::keyPressEvent(QKeyEvent* event) {
   if (m_base->handleKey(event)) {
     event->accept();
@@ -70,7 +74,7 @@ void ListViewCards::mousePressEvent(QMouseEvent* event) {
 
 void ListViewCards::paintEvent(QPaintEvent* event) {
   if (model() && model()->rowCount() == 0) {
-    paintEmptyListText(this, tr("No items found."));
+    paintEmptyListText(this, m_base->emptyText());
   }
 
   QListView::paintEvent(event);

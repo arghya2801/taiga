@@ -39,6 +39,41 @@ the global filters. Cards reflow into a single column at narrower window widths.
 The Anime/Manga selector uses the shared MAL manga cache for manga. Chapters, volumes,
 authors and rereads replace the corresponding anime metrics. Reading hours are not estimated.
 
+## Compare your taste over time
+
+In **Taste**, choose the start and end years for Period A and Period B. The ranges include
+both end years and must not overlap. Only completed titles with a usable personal finish year
+enter a period. A year-only finish date is enough; missing years are counted and excluded.
+Global filters apply to both periods.
+
+Compare genres, studios/authors or formats. Each row shows the title count, share of that
+period's completed titles, and mean rating for each side. Share changes use percentage points
+to account for different period sizes. Categories can overlap, so shares need not sum to 100%.
+Unrated titles count toward shares, but never toward means. A score change appears only when
+both sides meet the minimum rated sample. Double-click an A or B cell, or press Enter, to open
+the titles behind that value; Back to chart returns to Taste.
+
+These are your current ratings grouped by when you completed titles. They do not reconstruct
+the ratings you gave in those years.
+
+## Save a view
+
+Set the list, filters, page, rankings and period ranges, then choose **Save view...** and name
+the view. Select its name to restore it. **Update** replaces that selected preset with your
+current settings; **Delete** removes the preset after confirmation. Neither changes your list.
+Saved views also keep searches, table layouts and the timeline year. Temporary chart drilldowns
+are not saved, so a saved Titles page opens all titles matching its filters and search.
+
+Your last statistics setup is restored when you reopen Taiga. If a saved filter's value is
+missing from the current list, it stays selected and is marked unavailable; use Clear filters
+to return to the full list. Saved views are local preferences and can be reused across accounts.
+
+Ctrl+F focuses the Activity search on that page, or opens the Titles search from other pages.
+The main search box keeps separate text for anime lists, anime search, manga and torrents.
+Alt+Left and Alt+Right follow the navigation history, and choosing a new page after Back
+replaces the old forward branch. Switching between List, Cards and Grouped keeps selection
+and the title at the top of the view.
+
 ## What the numbers mean
 
 Unrated titles never count as zero in score averages. The episode-weighted mean weights
