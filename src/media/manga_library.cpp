@@ -1,5 +1,6 @@
 #include "manga_library.hpp"
 
+#include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
@@ -10,6 +11,7 @@
 #include <QXmlStreamWriter>
 #include <QtConcurrentRun>
 
+#include "media/account_activity.hpp"
 #include "sync/myanimelist/myanimelist.hpp"
 #include "taiga/accounts.hpp"
 #include "taiga/path.hpp"
@@ -38,6 +40,9 @@ Library::Library() {
   connect(&retry_, &QTimer::timeout, this, &Library::process);
 }
 Library::~Library() {
+  flush();
+}
+void Library::flush() {
   writer_.waitForDone();
 }
 
@@ -53,6 +58,7 @@ void Library::init() {
     return;
   }
   initialized_ = true;
+  connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, this, &Library::flush);
   auto* service = sync::myanimelist::Service::instance();
   connect(service, &sync::Service::authenticationCompleted, this, [this](bool ok) {
     if (ok) {
@@ -177,8 +183,11 @@ bool Library::persistPending() {
 }
 
 bool Library::save(const Entry& value) {
-  if (value.id <= 0 || !ready_ || account_.isEmpty()) return false;
+  if (value.id <= 0 || !ready_ || account_.isEmpty() ||
+      account_ != QString::fromStdString(taiga::accounts.myanimelistUsername()))
+    return false;
   const auto old = pending_;
+  const auto displayed = entries_.value(value.id);
   auto e = value;
   e.onList = true;
   const auto previous = pending_.contains(e.id) ? pending_[e.id].previous : entries_.value(e.id);
@@ -188,6 +197,8 @@ bool Library::save(const Entry& value) {
     return false;
   }
   entries_.insert(e.id, e);
+  stats::activity.record(stats::MediaKind::Manga, e.id, displayed.chaptersRead, e.chaptersRead,
+                         displayed.score, e.score);
   saveCache();
   emit changed(e.id);
   emit pendingChanged();
@@ -196,7 +207,9 @@ bool Library::save(const Entry& value) {
 }
 
 bool Library::remove(int id) {
-  if (!ready_ || !entries_.contains(id)) return false;
+  if (!ready_ || !entries_.contains(id) ||
+      account_ != QString::fromStdString(taiga::accounts.myanimelistUsername()))
+    return false;
   const auto old = pending_;
   const auto e = entries_.value(id);
   pending_.insert(id, {e, e, true, ++version_});

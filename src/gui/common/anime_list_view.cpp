@@ -21,14 +21,14 @@
 #include <QHeaderView>
 #include <QKeyEvent>
 
+#include "base/string.hpp"
 #include "gui/common/anime_list_item_delegate.hpp"
 #include "gui/common/anime_list_view_base.hpp"
 #include "gui/models/anime_list_model.hpp"
 #include "gui/models/anime_list_proxy_model.hpp"
-#include "taiga/options.hpp"
-#include "base/string.hpp"
 #include "gui/utils/painters.hpp"
 #include "gui/utils/widgets.hpp"
+#include "taiga/options.hpp"
 #include "track/play.hpp"
 
 namespace gui {
@@ -87,11 +87,8 @@ ListView::ListView(QWidget* parent, AnimeListModel* model, AnimeListProxyModel* 
 }
 
 void ListView::keyPressEvent(QKeyEvent* event) {
-  if (event->key() == Qt::Key::Key_Return || event->key() == Qt::Key::Key_Enter) {
-    const auto indexes = selectionModel()->selectedRows();
-    for (const auto& index : indexes) {
-      m_base->showMediaDialog(index);
-    }
+  if (m_base->handleKey(event)) {
+    event->accept();
     return;
   }
 
@@ -99,6 +96,10 @@ void ListView::keyPressEvent(QKeyEvent* event) {
 }
 
 void ListView::mousePressEvent(QMouseEvent* event) {
+  if (isGroupHeading(event->pos())) {
+    event->accept();
+    return;
+  }
   if (event->button() == Qt::MouseButton::MiddleButton) {
     const QModelIndex index = indexAt(event->pos());
     if (index.isValid()) {
@@ -109,6 +110,20 @@ void ListView::mousePressEvent(QMouseEvent* event) {
   }
 
   QTreeView::mousePressEvent(event);
+}
+
+bool ListView::isGroupHeading(const QPoint& point) const {
+  const auto index = indexAt(point);
+  return index.isValid() &&
+         !index.data(int(AnimeListItemDataRole::GroupHeading)).toString().isEmpty() &&
+         point.y() < visualRect(index).top() + 30;
+}
+void ListView::mouseDoubleClickEvent(QMouseEvent* event) {
+  if (isGroupHeading(event->pos())) {
+    event->accept();
+    return;
+  }
+  QTreeView::mouseDoubleClickEvent(event);
 }
 
 void ListView::paintEvent(QPaintEvent* event) {

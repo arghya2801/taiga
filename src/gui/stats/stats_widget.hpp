@@ -31,6 +31,7 @@ class QLineEdit;
 class QPushButton;
 namespace gui {
 class StatsTitlesModel;
+class StatsActivityModel;
 class StatsChart;
 class StatsWidget final : public PageWidget {
   Q_OBJECT
@@ -47,6 +48,7 @@ private:
   void render();
   void renderGroups();
   void renderTimeline();
+  void renderActivity();
   void showTitles(const QList<int>& ids = {}, const QString& label = {}, bool all = true);
   void drillDown(const QList<int>& ids, const QString& label);
   QList<stats::Record> snapshot() const;
@@ -55,7 +57,7 @@ private:
       *timelineYear_;
   QSpinBox* minimum_;
   QLabel *overview_, *scores_, *comparison_, *coverage_, *selection_, *timelineNote_, *tasteNote_,
-      *backlog_, *repeats_;
+      *backlog_, *repeats_, *activityNote_;
   QList<QLabel*> values_, notes_;
   QTabWidget* tabs_;
   QLineEdit* search_;
@@ -64,9 +66,12 @@ private:
   StatsChart* drillSource_ = nullptr;
   int previousTab_ = 0;
   QTableView* titlesView_;
+  QTableView* activityView_;
+  StatsActivityModel* activityModel_;
   StatsTitlesModel* titlesModel_;
   QSortFilterProxyModel* titlesProxy_;
   stats::Summary summary_;
+  stats::ActivitySummary activitySummary_;
   QTimer debounce_;
   quint64 revision_ = 0;
   bool dirty_ = true, calculating_ = false;

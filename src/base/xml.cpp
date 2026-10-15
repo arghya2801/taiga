@@ -43,7 +43,7 @@ bool XmlFileReader::readElement(QAnyStringView name) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-const QFile& XmlFileWriter::file() const {
+const QSaveFile& XmlFileWriter::file() const {
   return file_;
 }
 
@@ -59,6 +59,9 @@ bool XmlFileWriter::open(const QString& name) {
 
 void XmlFileWriter::writeNumberElement(QAnyStringView name, int number) {
   writeTextElement(name, QString::number(number));
+}
+bool XmlFileWriter::commit() {
+  return !hasError() && file_.commit();
 }
 
 }  // namespace base

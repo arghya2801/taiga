@@ -285,13 +285,16 @@ void MediaMenu::refresh() const {
 void MediaMenu::removeFromList() const {
   QList<QString> titles;
   for (const auto& item : m_items) {
-    titles.push_back(u"<li>%1</li>"_s.arg(anime::preferredTitle(item)));
+    if (anime::list::isInList(getEntry(item.id)))
+      titles.push_back(u"<li>%1</li>"_s.arg(
+          QString::fromStdString(anime::preferredTitle(item)).toHtmlEscaped()));
   }
+  if (titles.isEmpty()) return;
 
   if (confirm(parentWidget(), tr("Do you want to remove selected items from your list?"),
               u"<ul>%1</ul>"_s.arg(titles.join("")), tr("Remove"))) {
     for (const auto& item : m_items) {
-      anime::list::remove(item.id);
+      if (anime::list::isInList(getEntry(item.id))) anime::list::remove(item.id);
     }
   }
 }
@@ -460,7 +463,7 @@ void MediaMenu::edit() const {
 void MediaMenu::addMediaItems() {
   if (!isBatch()) {
     // View details
-    addAction(theme.getIcon("info"), tr("Details"), tr("Enter"), this, &MediaMenu::viewDetails);
+    addAction(theme.getIcon("info"), tr("Details"), this, &MediaMenu::viewDetails);
 
     if (m_context != AnimeListContext::Search) {
       // Search

@@ -18,6 +18,7 @@
 
 #include "anime_history.hpp"
 
+#include <QFile>
 #include <QSqlDatabase>
 #include <algorithm>
 #include <format>
@@ -156,6 +157,7 @@ void History::migrateFromV1() {
     return std::format("{}/v1/user/{}@{}/history.xml", taiga::get_data_path(),
                        taiga::accounts.serviceUsername(service), service);
   }();
+  if (!QFile::exists(QString::fromStdString(path))) return;
 
   db.transaction();
 

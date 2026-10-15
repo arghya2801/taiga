@@ -22,6 +22,7 @@
 
 #include "base/string.hpp"
 #include "gui/models/anime_list_model.hpp"
+#include "gui/utils/format.hpp"
 #include "media/anime.hpp"
 #include "media/anime_db.hpp"
 #include "media/anime_list.hpp"
@@ -142,6 +143,11 @@ bool AnimeListProxyModel::lessThan(const QModelIndex& lhs, const QModelIndex& rh
   const auto rhs_entry = model->getListEntry(rhs);
   if (!lhs_anime || !rhs_anime) return false;
 
+  if (grouping_ != AnimeListGrouping::None) {
+    const int left = groupKey(lhs), right = groupKey(rhs);
+    if (left != right) return sortOrder() == Qt::AscendingOrder ? left < right : left > right;
+  }
+
   const auto compareTitles = [&] {
     return cachedTitle(*lhs_anime).compare(cachedTitle(*rhs_anime), Qt::CaseInsensitive);
   };
@@ -162,6 +168,35 @@ bool AnimeListProxyModel::lessThan(const QModelIndex& lhs, const QModelIndex& rh
   // for descending sorts so it always reads A-Z.
   const int titles = compareTitles();
   return sortOrder() == Qt::AscendingOrder ? titles < 0 : titles > 0;
+}
+
+void AnimeListProxyModel::setGrouping(AnimeListGrouping grouping) {
+  if (grouping_ == grouping) return;
+  grouping_ = grouping;
+  invalidate();
+}
+
+int AnimeListProxyModel::groupKey(const QModelIndex& sourceIndex) const {
+  const auto* model = static_cast<AnimeListModel*>(sourceModel());
+  if (grouping_ == AnimeListGrouping::Status) {
+    const auto* entry = model->getListEntry(sourceIndex);
+    return anime::list::isInList(entry) ? int(entry->status) : 6;
+  }
+  const auto* item = model->getAnime(sourceIndex);
+  return item && item->type != anime::Type::Unknown ? int(item->type) : 7;
+}
+
+QVariant AnimeListProxyModel::data(const QModelIndex& index, int role) const {
+  if (role != int(AnimeListItemDataRole::GroupHeading))
+    return QSortFilterProxyModel::data(index, role);
+  if (!index.isValid() || grouping_ == AnimeListGrouping::None) return {};
+  const auto source = mapToSource(index);
+  const int key = groupKey(source);
+  if (index.row() > 0 && key == groupKey(mapToSource(this->index(index.row() - 1, 0)))) return {};
+  if (grouping_ == AnimeListGrouping::Status)
+    return key == 6 ? tr("Not in your list")
+                    : formatListStatus(static_cast<anime::list::Status>(key));
+  return key == 7 ? tr("Unknown format") : formatType(static_cast<anime::Type>(key));
 }
 
 QString AnimeListProxyModel::cachedTitle(const Anime& item) const {

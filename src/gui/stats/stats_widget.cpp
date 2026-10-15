@@ -54,6 +54,7 @@
 #include "gui/media/media_dialog.hpp"
 #include "gui/utils/format.hpp"
 #include "gui/utils/theme.hpp"
+#include "media/account_activity.hpp"
 #include "media/anime_db.hpp"
 #include "media/anime_utils.hpp"
 #include "media/manga_library.hpp"
@@ -79,8 +80,11 @@ enum Chart {
   Months,
   Releases,
   Length,
-  Progress
+  Progress,
+  DailyActivity,
+  MonthlyActivity
 };
+constexpr int kTitlesTab = 5;
 enum Role { ValueRole = Qt::UserRole + 1, RatioRole, NoteRole, IdsRole, ValueTextRole };
 QString hours(qint64 seconds) {
   return QLocale().toString(seconds / 3600.0, 'f', 1);
@@ -288,12 +292,20 @@ public:
       setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     const auto open = [this](const QModelIndex& index) {
       if (index.isValid() && activate)
-        activate(index.data(IdsRole).value<QList<int>>(), index.data(Qt::UserRole).toString());
+        activate(index.data(IdsRole).value<QList<int>>(), index.data(Qt::UserRole).toString(),
+                 index.data(NoteRole).toString());
     };
     connect(this, &QListView::clicked, this, open);
     connect(this, &QListView::activated, this, open);
   }
-  std::function<void(const QList<int>&, const QString&)> activate;
+  std::function<void(const QList<int>&, const QString&, const QString&)> activate;
+  void setEmptyText(const QString& text) {
+    emptyText_ = text;
+  }
+  void setMinimumColumnWidth(int width) {
+    minimumColumnWidth_ = width;
+    fitColumns();
+  }
   void setRows(const QList<ChartRow>& rows) {
     model_->clear();
     double maximum = 0;
@@ -313,6 +325,9 @@ public:
     }
     setFixedHeight(columns_ ? 204
                             : std::max(108, std::min(visibleRows_, int(rows.size())) * 54 + 4));
+    setAccessibleDescription(
+        rows.isEmpty() ? emptyText_
+                       : tr("Use arrow keys to select a bar and Enter to view its titles."));
     fitColumns();
     viewport()->update();
   }
@@ -334,19 +349,23 @@ protected:
     if (!model_->rowCount()) {
       QPainter p(viewport());
       p.setPen(theme.color(Theme::Color::Muted));
-      p.drawText(
-          viewport()->rect().adjusted(8, 8, -8, -8), Qt::AlignCenter | Qt::TextWordWrap,
-          tr("No titles match this chart. Try clearing the filters or synchronizing your list."));
+      p.drawText(viewport()->rect().adjusted(8, 8, -8, -8), Qt::AlignCenter | Qt::TextWordWrap,
+                 emptyText_);
     }
   }
 
 private:
   void fitColumns() {
     if (columns_)
-      setGridSize(QSize(std::max(38, viewport()->width() / std::max(1, model_->rowCount())), 180));
+      setGridSize(QSize(
+          std::max(minimumColumnWidth_, viewport()->width() / std::max(1, model_->rowCount())),
+          180));
   }
   bool columns_;
   int visibleRows_;
+  int minimumColumnWidth_ = 38;
+  QString emptyText_ =
+      tr("No titles match this chart. Try clearing the filters or synchronizing your list.");
   QStandardItemModel* model_;
 };
 
@@ -411,6 +430,66 @@ public:
         return r.completionMonth.isEmpty() ? r.completionYear : r.completionMonth;
       case 9:
         return r.updated.toString(Qt::ISODate);
+    }
+    return {};
+  }
+};
+
+class StatsActivityModel final : public QAbstractTableModel {
+public:
+  using QAbstractTableModel::QAbstractTableModel;
+  QList<stats::ActivityChange> rows;
+  QHash<int, QString> titles;
+  void setRows(const stats::ActivitySummary& activity, const QList<stats::Record>& records) {
+    beginResetModel();
+    rows = activity.changes;
+    titles.clear();
+    for (const auto& record : records) titles.insert(record.id, record.title);
+    endResetModel();
+  }
+  int rowCount(const QModelIndex& parent = {}) const override {
+    return parent.isValid() ? 0 : int(rows.size());
+  }
+  int columnCount(const QModelIndex& parent = {}) const override {
+    return parent.isValid() ? 0 : 4;
+  }
+  QVariant headerData(int section, Qt::Orientation orientation, int role) const override {
+    if (orientation != Qt::Horizontal || role != Qt::DisplayRole) return {};
+    return QStringList{tr("Recorded at"), tr("Title"), tr("Progress change"), tr("Score change")}
+        .value(section);
+  }
+  QVariant data(const QModelIndex& index, int role) const override {
+    if (!index.isValid() || index.row() >= rows.size()) return {};
+    const auto& row = rows[index.row()];
+    if (role == Qt::UserRole + 1) return row.mediaId;
+    if (role != Qt::DisplayRole && role != Qt::UserRole) return {};
+    if (role == Qt::UserRole) {
+      switch (index.column()) {
+        case 0:
+          return row.time.toMSecsSinceEpoch();
+        case 1:
+          return titles.value(row.mediaId);
+        case 2:
+          return row.progress - row.previousProgress;
+        case 3:
+          return row.score - row.previousScore;
+      }
+    }
+    const auto score = [](double value) {
+      return value > 0 ? number(value) : StatsWidget::tr("Unrated");
+    };
+    switch (index.column()) {
+      case 0:
+        return QLocale().toString(row.time.toLocalTime(), QLocale::ShortFormat);
+      case 1:
+        return titles.value(row.mediaId, tr("Unknown title #%1").arg(row.mediaId));
+      case 2:
+        return row.previousProgress == row.progress
+                   ? QStringLiteral("—")
+                   : tr("%1 → %2").arg(count(row.previousProgress), count(row.progress));
+      case 3:
+        return row.previousScore == row.score ? QStringLiteral("—")
+                                              : score(row.previousScore) + " → " + score(row.score);
     }
     return {};
   }
@@ -522,14 +601,16 @@ StatsWidget::StatsWidget(QWidget* parent) : PageWidget(parent) {
     tabs_->addTab(area, name);
     return box;
   };
-  charts_.resize(16);
+  charts_.resize(18);
   const auto chart = [&](StatsCard* card, int index, bool columns = false, int rows = 6) {
     auto* view = new StatsChart(columns, rows, card);
     view->setObjectName(QStringLiteral("statsChart%1").arg(index));
     view->setAccessibleName(card->findChild<QLabel*>()->text());
-    view->activate = [this, index](const QList<int>& ids, const QString& label) {
+    view->activate = [this, index](const QList<int>& ids, const QString& label,
+                                   const QString& note) {
       drillSource_ = charts_[index];
-      drillDown(ids, charts_[index]->accessibleName() + ": " + label);
+      drillDown(ids, charts_[index]->accessibleName() + ": " +
+                         (index == DailyActivity || index == MonthlyActivity ? note : label));
     };
     card->layout()->addWidget(view);
     static_cast<QVBoxLayout*>(card->layout())->addStretch();
@@ -562,8 +643,8 @@ StatsWidget::StatsWidget(QWidget* parent) : PageWidget(parent) {
     drillSource_ = nullptr;
     QList<int> ids;
     for (const auto& r : summary_.records)
-      if (r.status != "Completed" && r.status != "Dropped" && r.updated.isValid() &&
-          r.updated.daysTo(QDate::currentDate()) >= 180)
+      if ((r.repeating || (r.status != "Completed" && r.status != "Dropped")) &&
+          r.updated.isValid() && r.updated.daysTo(QDate::currentDate()) >= 180)
         ids.append(r.id);
     drillDown(ids, tr("Unfinished titles unchanged for 180+ days"));
   });
@@ -690,11 +771,64 @@ StatsWidget::StatsWidget(QWidget* parent) : PageWidget(parent) {
       chart(new StatsCard(tr("Short series or long commitments?"),
                           tr("Titles grouped by their total episode or chapter count.")),
             Length));
-  timelineGrid->add(
-      chart(new StatsCard(tr("How close are you to finishing?"),
-                          tr("Watching, reading and on-hold titles with known totals.")),
-            Progress));
+  timelineGrid->add(chart(
+      new StatsCard(tr("How close are you to finishing?"),
+                    tr("Watching, reading, on-hold titles and active repeats with known totals.")),
+      Progress));
   timelineBox->addStretch();
+
+  auto* activityBox = page(tr("Activity"));
+  activityNote_ = new QLabel;
+  activityNote_->setWordWrap(true);
+  activityBox->addWidget(activityNote_);
+  auto* daily =
+      new StatsCard(tr("Progress over the last 30 days"),
+                    tr("Episodes or chapters added through Taiga. Hover or focus a bar for the "
+                       "exact date; corrections are excluded from added totals."));
+  activityBox->addWidget(chart(daily, DailyActivity, true));
+  charts_[DailyActivity]->setMinimumColumnWidth(20);
+  activityBox->addWidget(
+      chart(new StatsCard(
+                tr("Progress over the last 12 months"),
+                tr("Recorded increases, including progress made during rewatches and rereads.")),
+            MonthlyActivity, true));
+  for (int index : {DailyActivity, MonthlyActivity})
+    charts_[index]->setEmptyText(
+        tr("No progress has been recorded in Taiga yet. Progress edits will build this chart."));
+  auto* activityCard = new StatsCard(tr("Progress and rating history"),
+                                     tr("Exact before-and-after values for edits made in Taiga. "
+                                        "Your global filters apply here too."));
+  auto* activitySearch = new QLineEdit(activityCard);
+  activitySearch->setPlaceholderText(tr("Find a title in your activity…"));
+  activitySearch->setAccessibleName(tr("Search local activity"));
+  activitySearch->setClearButtonEnabled(true);
+  activityCard->layout()->addWidget(activitySearch);
+  activityModel_ = new StatsActivityModel(this);
+  auto* activityProxy = new QSortFilterProxyModel(this);
+  activityProxy->setSourceModel(activityModel_);
+  activityProxy->setSortRole(Qt::UserRole);
+  activityProxy->setFilterKeyColumn(1);
+  activityProxy->setFilterCaseSensitivity(Qt::CaseInsensitive);
+  activityView_ = new QTableView(activityCard);
+  activityView_->setObjectName("statsActivity");
+  activityView_->setAccessibleName(tr("Recorded progress and score changes"));
+  activityView_->setModel(activityProxy);
+  activityView_->setSortingEnabled(true);
+  activityView_->sortByColumn(0, Qt::DescendingOrder);
+  activityView_->setSelectionBehavior(QAbstractItemView::SelectRows);
+  activityView_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+  activityView_->setAlternatingRowColors(true);
+  activityView_->verticalHeader()->hide();
+  activityView_->horizontalHeader()->setStretchLastSection(true);
+  activityView_->setColumnWidth(0, 155);
+  activityView_->setColumnWidth(1, 310);
+  activityView_->setColumnWidth(2, 145);
+  activityView_->setMinimumHeight(300);
+  activityCard->layout()->addWidget(activityView_);
+  activityBox->addWidget(activityCard);
+  activityBox->addStretch();
+  connect(activitySearch, &QLineEdit::textChanged, activityProxy,
+          &QSortFilterProxyModel::setFilterFixedString);
 
   auto* library = new QWidget(tabs_);
   auto* libraryBox = new QVBoxLayout(library);
@@ -747,7 +881,7 @@ StatsWidget::StatsWidget(QWidget* parent) : PageWidget(parent) {
     showTitles();
   });
   const auto returnToChart = [this] {
-    if (tabs_->currentIndex() != 4) return;
+    if (tabs_->currentIndex() != kTitlesTab) return;
     tabs_->setCurrentIndex(previousTab_);
     if (drillSource_) drillSource_->setFocus();
   };
@@ -790,6 +924,7 @@ StatsWidget::StatsWidget(QWidget* parent) : PageWidget(parent) {
       QDesktopServices::openUrl(QUrl(QStringLiteral("https://myanimelist.net/manga/%1").arg(id)));
   };
   connect(titlesView_, &QTableView::activated, this, openTitle);
+  connect(activityView_, &QTableView::activated, this, openTitle);
   for (int i = 0; i < tabs_->count(); ++i) {
     auto* action = new QAction(this);
     action->setShortcut(QKeySequence(QStringLiteral("Ctrl+%1").arg(i + 1)));
@@ -808,6 +943,7 @@ StatsWidget::StatsWidget(QWidget* parent) : PageWidget(parent) {
   connect(&manga::library, &manga::Library::changed, this, [this] { invalidate(); });
   connect(&taiga::accounts, &taiga::Accounts::authenticationChanged, this,
           [this] { invalidate(); });
+  connect(&stats::activity, &stats::ActivityLog::changed, this, [this] { invalidate(); });
   manga::library.init();
 }
 
@@ -823,6 +959,7 @@ QList<stats::Record> StatsWidget::snapshot() const {
       r.score = entry.score / 10.0;
       r.progress = entry.watched_episodes;
       r.repeats = entry.rewatched_times;
+      r.repeating = entry.rewatching;
       r.started = exactDate(entry.date_started);
       r.completed = exactDate(entry.date_completed);
       r.completionYear = yearKey(entry.date_completed);
@@ -877,6 +1014,7 @@ QList<stats::Record> StatsWidget::snapshot() const {
       r.total = e.chapters;
       r.secondaryProgress = e.volumesRead;
       r.repeats = e.timesReread;
+      r.repeating = e.rereading;
       records.append(r);
     }
   }
@@ -930,16 +1068,23 @@ void StatsWidget::refresh() {
   titlesView_->setEnabled(false);
   for (auto* chart : charts_) chart->setEnabled(false);
   overview_->setText(tr("Calculating statistics for %1 saved titles…").arg(count(records.size())));
-  QtConcurrent::run([records = std::move(records), filter] {
-    return stats::calculate(records, filter);
-  }).then(this, [this, revision](stats::Summary result) {
+  auto changes = stats::activity.records(kind_->currentIndex() ? stats::MediaKind::Manga
+                                                               : stats::MediaKind::Anime);
+  QtConcurrent::run([records = std::move(records), changes = std::move(changes), filter] {
+    auto summary = stats::calculate(records, filter);
+    QSet<int> ids;
+    for (const auto& record : summary.records) ids.insert(record.id);
+    auto activity = stats::calculateActivity(changes, ids);
+    return std::make_pair(std::move(summary), std::move(activity));
+  }).then(this, [this, revision](std::pair<stats::Summary, stats::ActivitySummary> result) {
     calculating_ = false;
     if (revision != revision_) {
       debounce_.start();
       return;
     }
     dirty_ = false;
-    summary_ = std::move(result);
+    summary_ = std::move(result.first);
+    activitySummary_ = std::move(result.second);
     render();
     titlesView_->setEnabled(true);
     for (auto* chart : charts_) chart->setEnabled(true);
@@ -980,13 +1125,13 @@ void StatsWidget::render() {
   notes_[3]->setText(tr("Mean score out of 10\n%1 rated, %2 unrated")
                          .arg(count(s.scored), count(s.records.size() - s.scored)));
   backlog_->setText(tr("%1 known %2 left%3. %4 unfinished titles unchanged for 180+ days. "
-                       "Completed and dropped titles are excluded.")
+                       "Completed and dropped titles are excluded unless repeating.")
                         .arg(count(s.remainingUnits), unit,
                              manga ? QString{} : tr(" (%1 hours)").arg(hours(s.remainingSeconds)),
                              count(s.stale)));
-  repeats_->setText(
-      tr("%1 recorded repeats across %2 titles, adding %3 %4 with known totals.")
-          .arg(count(s.repeatCount), count(s.repeatedTitles), count(s.repeatUnits), unit));
+  repeats_->setText(tr("%1 completed repeats and %2 active across %3 titles, adding %4 %5.")
+                        .arg(count(s.repeatCount), count(s.activeRepeats), count(s.repeatedTitles),
+                             count(s.repeatUnits), unit));
   QStringList modes;
   for (const auto mode : s.modes) modes.append(QLocale().toString(mode, 'f', 1));
   scores_->setText(
@@ -1078,9 +1223,9 @@ void StatsWidget::render() {
   charts_[Difference]->setRows(differenceRows);
   QList<stats::Record> unfinished, repeated, above, below;
   for (const auto& r : s.records) {
-    if (r.status != "Completed" && r.status != "Dropped" && r.total > r.progress)
+    if ((r.repeating || (r.status != "Completed" && r.status != "Dropped")) && r.total > r.progress)
       unfinished.append(r);
-    if (r.repeats > 0) repeated.append(r);
+    if (r.repeats > 0 || r.repeating) repeated.append(r);
     if (r.score > 0 && r.communityScore > 0) {
       if (r.score > r.communityScore) above.append(r);
       if (r.score < r.communityScore) below.append(r);
@@ -1111,9 +1256,10 @@ void StatsWidget::render() {
          {r.id}});
   for (const auto& r : repeated.first(std::min(qsizetype(6), repeated.size())))
     repeatRows.append({r.title,
-                       count(r.repeats),
-                       manga ? tr("Recorded rereads") : tr("Recorded rewatches"),
-                       double(r.repeats),
+                       count(r.repeats) + (r.repeating ? tr(" + active") : QString{}),
+                       r.repeating ? tr("Repeat in progress")
+                                   : (manga ? tr("Recorded rereads") : tr("Recorded rewatches")),
+                       double(r.repeats + r.repeating),
                        {r.id}});
   const auto disagreements = [](const QList<stats::Record>& records) {
     QList<ChartRow> rows;
@@ -1143,6 +1289,7 @@ void StatsWidget::render() {
   const int previousIndex = timelineYear_->findData(previousYear);
   if (previousIndex >= 0) timelineYear_->setCurrentIndex(previousIndex);
   renderTimeline();
+  renderActivity();
   search_->clear();
   showTitles();
 }
@@ -1254,6 +1401,45 @@ void StatsWidget::renderTimeline() {
   charts_[Progress]->setRows(progressRows);
 }
 
+void StatsWidget::renderActivity() {
+  const auto& activity = activitySummary_;
+  activityNote_->setText(
+      activity.changes.isEmpty()
+          ? tr("No local activity for this selection yet. Progress and score edits you make in "
+               "Taiga will appear here. Earlier activity and changes made only on MAL are not "
+               "reconstructed.")
+          : tr("%1 recorded changes since %2, adding %3 %4 and recording %5 score changes. This is "
+               "activity captured in Taiga, not a complete MAL history.")
+                .arg(count(activity.changes.size()),
+                     QLocale().toString(activity.firstDate, QLocale::ShortFormat),
+                     count(activity.addedUnits),
+                     kind_->currentIndex() ? tr("chapters") : tr("episodes"),
+                     count(activity.scoreChanges)));
+  QMap<QString, stats::Group> days, months;
+  for (const auto& group : activity.days) days.insert(group.name, group);
+  for (const auto& group : activity.months) months.insert(group.name, group);
+  QList<ChartRow> dailyRows, monthlyRows;
+  const auto today = QDate::currentDate();
+  if (!activity.changes.isEmpty()) {
+    for (int i = 29; i >= 0; --i) {
+      const auto date = today.addDays(-i);
+      const auto group = days.value(date.toString(Qt::ISODate));
+      dailyRows.append({QString::number(date.day()), count(group.units),
+                        QLocale().toString(date, QLocale::LongFormat), double(group.units),
+                        group.ids});
+    }
+    for (int i = 11; i >= 0; --i) {
+      const auto date = QDate(today.year(), today.month(), 1).addMonths(-i);
+      const auto group = months.value(date.toString("yyyy-MM"));
+      monthlyRows.append({date.toString("MMM"), count(group.units), date.toString("MMMM yyyy"),
+                          double(group.units), group.ids});
+    }
+  }
+  charts_[DailyActivity]->setRows(dailyRows);
+  charts_[MonthlyActivity]->setRows(monthlyRows);
+  activityModel_->setRows(activity, summary_.records);
+}
+
 void StatsWidget::showTitles(const QList<int>& ids, const QString& label, bool all) {
   const QSet<int> selected(ids.begin(), ids.end());
   QList<stats::Record> rows;
@@ -1263,13 +1449,13 @@ void StatsWidget::showTitles(const QList<int>& ids, const QString& label, bool a
   selection_->setText(
       tr("%1%2 titles. Double-click or press Enter to open a title.")
           .arg(label.isEmpty() ? QString{} : label + "\n", count(titlesModel_->rowCount())));
-  tabs_->setTabText(4, tr("Titles (%1)").arg(count(titlesModel_->rowCount())));
+  tabs_->setTabText(kTitlesTab, tr("Titles (%1)").arg(count(titlesModel_->rowCount())));
 }
 void StatsWidget::drillDown(const QList<int>& ids, const QString& label) {
-  if (tabs_->currentIndex() != 4) previousTab_ = tabs_->currentIndex();
+  if (tabs_->currentIndex() != kTitlesTab) previousTab_ = tabs_->currentIndex();
   search_->clear();
   showTitles(ids, label, false);
-  tabs_->setCurrentIndex(4);
+  tabs_->setCurrentIndex(kTitlesTab);
   titlesView_->setFocus();
 }
 }  // namespace gui

@@ -27,8 +27,8 @@
 #include "gui/common/anime_list_view_base.hpp"
 #include "gui/models/anime_list_model.hpp"
 #include "gui/models/anime_list_proxy_model.hpp"
-#include "taiga/options.hpp"
 #include "gui/utils/painters.hpp"
+#include "taiga/options.hpp"
 
 namespace gui {
 
@@ -47,11 +47,8 @@ ListViewCards::ListViewCards(QWidget* parent, AnimeListModel* model,
 }
 
 void ListViewCards::keyPressEvent(QKeyEvent* event) {
-  if (event->key() == Qt::Key::Key_Return || event->key() == Qt::Key::Key_Enter) {
-    const auto indexes = selectionModel()->selectedIndexes();
-    for (const auto& index : indexes) {
-      m_base->showMediaDialog(index);
-    }
+  if (m_base->handleKey(event)) {
+    event->accept();
     return;
   }
 

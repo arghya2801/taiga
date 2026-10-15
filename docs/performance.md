@@ -24,8 +24,29 @@ score-gap, series-length and progress groups took 31 ms for 1,000 titles, 300 ms
 and 1,578 ms for 50,000. The rendering figures describe different page contents, so they
 are not a controlled before/after comparison. Aggregation remains off the UI thread.
 
-These are single local measurements, not latency guarantees. Initialization excludes process
-loading before `main()` and does not measure the complete application's cold startup.
+## Whole-application checks, October 15, 2026
+
+The expanded benchmark runs the real `Application::run()` startup path in separate processes
+against a temporary 10,000-title SQLite account. It renders the first main-window frame,
+loads generated cached JPEG covers through the real image provider, scrolls the card view,
+and delivers ten 100-title metadata pages while a UI timer measures event-loop delays.
+
+| Measurement | Result |
+|---|---:|
+| Fresh process launch to first main-window frame, first run | 1,814 ms |
+| Fresh process launch to first main-window frame, repeated run | 1,479 ms |
+| Decode 24 cached covers into the pixmap cache | 32 ms |
+| Full main-window card scrolling and rendering | 27.0 ms/frame |
+| Largest UI heartbeat gap during the ten metadata pages | 28 ms |
+
+These are fresh-process starts with the operating system's filesystem cache retained, not
+cold-boot disk measurements. Network access, recognition and startup folder scanning are
+disabled in the probe. Cover measurements use synthetic local images, not remote downloads.
+The test executable routes all HTTP to loopback and the startup probe cannot attach to or
+activate a user's running Taiga instance. The extra probe path is absent from production.
+
+These are single local measurements, not latency guarantees. The earlier empty-cache harness
+initialization excludes process loading before `main()`; the fresh-process figures above include it.
 Rendering uses the Windows font engine with test widgets kept hidden. The query and sort
 measurements use the actual anime list model and proxy, rather than a stand-in container.
 
@@ -36,10 +57,11 @@ Run from the repository root:
 .\setup\check-local.ps1 -Benchmark -Screenshot
 ```
 
-The screenshot checks write `statistics-dark-0.png` through `statistics-dark-3.png`, their light
+The screenshot checks write `statistics-dark-0.png` through `statistics-dark-4.png`, their light
 counterparts, `statistics-narrow.png` and `statistics-backlog.png` beside the executables in
 `bin/RelWithDebInfo`. `statistics-main-window.png` also covers the actual sidebar and page
 styling. Fixtures include varied statuses, scores, dates, formats and studios.
+`grouped-list-check.png` covers the grouped layout and its existing columns.
 
 ## What changed
 
@@ -70,4 +92,5 @@ cache invalidation, statistics filtering/drill-down, manga row updates and usabl
 The HTTP transport in the integration binary is compiled to redirect requests to loopback;
 it cannot send mutations to a live service. Production builds use the normal transport.
 
-Grouped list/season layouts and v1 migration gaps are documented in `FEATURE_GAPS.md`.
+Restored grouped list/season layouts and remaining v1 migration limits are documented in
+`FEATURE_GAPS.md`.

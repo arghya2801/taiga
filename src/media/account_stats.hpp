@@ -1,8 +1,10 @@
 #pragma once
 
 #include <QDate>
+#include <QDateTime>
 #include <QList>
 #include <QMap>
+#include <QSet>
 #include <QStringList>
 #include <array>
 
@@ -32,6 +34,7 @@ struct Record {
   qint64 repeats = 0;
   int minutesPerEpisode = 0;
   bool estimatedDuration = false;
+  bool repeating = false;
 };
 
 struct Filter {
@@ -70,6 +73,7 @@ struct Summary {
   QList<Record> records;
   QMap<Dimension, QList<Group>> groups;
   int scored = 0, completed = 0, dropped = 0, repeatedTitles = 0;
+  int activeRepeats = 0;
   int compared = 0, unknownTotals = 0, unknownDuration = 0;
   int estimatedDuration = 0, unknownCompletionDates = 0, stale = 0;
   qint64 units = 0, secondaryUnits = 0, repeatUnits = 0, repeatCount = 0;
@@ -84,5 +88,21 @@ struct Summary {
 Summary calculate(const QList<Record>& records, const Filter& filter = {},
                   QDate today = QDate::currentDate());
 QStringList keys(const Record& record, Dimension dimension);
+
+struct ActivityChange {
+  qint64 id = 0;
+  int mediaId = 0;
+  QDateTime time;
+  qint64 previousProgress = 0, progress = 0;
+  double previousScore = 0, score = 0;
+};
+struct ActivitySummary {
+  QList<ActivityChange> changes;
+  QList<Group> days, months;
+  QDate firstDate;
+  qint64 addedUnits = 0;
+  int scoreChanges = 0;
+};
+ActivitySummary calculateActivity(const QList<ActivityChange>& changes, const QSet<int>& ids);
 
 }  // namespace stats

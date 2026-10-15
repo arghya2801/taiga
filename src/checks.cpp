@@ -191,6 +191,69 @@ void checkStatistics() {
   large.progress = 1LL << 40;
   check(stats::calculate({large}).groups[stats::Dimension::Progress][0].name == "3",
         "oversized progress clamps before converting chart bucket to integer");
+  auto active = a;
+  active.repeats = 0;
+  active.repeating = true;
+  active.progress = 11;
+  s = stats::calculate({active});
+  check(s.units == 23 && s.repeatUnits == 11 && s.activeRepeats == 1 && s.repeatedTitles == 1,
+        "an active first repeat preserves the original completed pass");
+  check(s.remainingUnits == 1 && s.groups[stats::Dimension::Progress].size() == 1,
+        "active repeats count toward backlog even with completed status");
+  active.repeating = false;
+  active.repeats = 1;
+  active.progress = 12;
+  s = stats::calculate({active});
+  check(s.units == 24 && s.repeatUnits == 12 && s.activeRepeats == 0,
+        "finishing a repeat adds only the last episode");
+  active.repeating = true;
+  active.progress = 5;
+  s = stats::calculate({active});
+  check(s.units == 29 && s.repeatUnits == 17,
+        "another active repeat includes earlier completed repeats");
+  active.total = 0;
+  s = stats::calculate({active});
+  check(s.units == 5 && s.repeatUnits == 5 && s.remainingUnits == 0,
+        "unknown totals retain observed repeat progress without inventing earlier passes");
+}
+
+void checkActivity() {
+  const QDateTime time(QDate(2026, 10, 15), QTime(12, 0));
+  stats::ActivityChange a{1, 1, time, 2, 5, 7, 8};
+  auto correction = a;
+  correction.id = 2;
+  correction.previousProgress = 5;
+  correction.progress = 3;
+  correction.previousScore = correction.score = 8;
+  auto other = a;
+  other.id = 3;
+  other.mediaId = 2;
+  auto earlier = a;
+  earlier.id = 4;
+  earlier.time = time.addMonths(-1);
+  earlier.previousProgress = 0;
+  earlier.progress = 1;
+  earlier.previousScore = earlier.score = 0;
+  auto invalid = a;
+  invalid.id = 5;
+  invalid.score = NAN;
+  auto unchanged = a;
+  unchanged.id = 6;
+  unchanged.previousProgress = unchanged.progress;
+  unchanged.previousScore = unchanged.score;
+  const auto result =
+      stats::calculateActivity({a, correction, other, earlier, invalid, unchanged}, {1});
+  check(result.changes.size() == 3 && result.scoreChanges == 1 && result.addedUnits == 4,
+        "local history filters titles and excludes corrections from newly added units");
+  check(result.days.size() == 2 && result.months.size() == 2 &&
+            result.firstDate == time.addMonths(-1).date(),
+        "activity groups use recorded local dates without inventing earlier activity");
+  check(result.days.last().ids == QList<int>{1} && result.days.last().units == 3,
+        "daily chart retains distinct contributing title IDs");
+  check(result.changes[0].id == 2 && result.changes.last().id == 4,
+        "activity history sorts by time then insertion order");
+  check(stats::calculateActivity({a}, {}).changes.isEmpty(),
+        "empty activity selection stays empty");
 }
 
 void checkMangaIo() {
@@ -293,6 +356,7 @@ int main(int argc, char* argv[]) {
   checkAtf();
   checkFeedFilters();
   checkStatistics();
+  checkActivity();
   checkMangaIo();
   checkQueries();
   if (app.arguments().contains("--benchmark")) benchmarkStatistics();

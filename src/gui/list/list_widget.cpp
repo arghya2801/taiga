@@ -84,11 +84,15 @@ void ListWidget::setViewMode(ListViewMode mode) {
   };
 
   m_viewMode = mode;
+  m_proxyModel->setGrouping(mode == ListViewMode::Grouped ? AnimeListGrouping::Status
+                                                          : AnimeListGrouping::None);
 
   switch (mode) {
     case ListViewMode::List:
+    case ListViewMode::Grouped:
       m_listView = new ListView(this, m_model, m_proxyModel, AnimeListContext::List);
       layout()->addWidget(m_listView);
+      m_listView->setUniformRowHeights(mode != ListViewMode::Grouped);
       m_listView->show();
       break;
 
@@ -174,6 +178,7 @@ void ListWidget::initViewMenu() {
   static const QList<QPair<QString, ListViewMode>> items{
       {"List", ListViewMode::List},
       {"Cards", ListViewMode::Cards},
+      {"Grouped", ListViewMode::Grouped},
   };
 
   const auto actionGroup = new QActionGroup(this);

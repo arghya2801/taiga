@@ -44,9 +44,11 @@ public:
 protected:
   void keyPressEvent(QKeyEvent* event) override;
   void mousePressEvent(QMouseEvent* event) override;
+  void mouseDoubleClickEvent(QMouseEvent* event) override;
   void paintEvent(QPaintEvent* event) override;
 
 private:
+  bool isGroupHeading(const QPoint& point) const;
   ListViewBase* m_base = nullptr;
 };
 

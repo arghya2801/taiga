@@ -71,37 +71,64 @@ template <typename T>
 bool compare(const T& a, const T& b, FilterOperator op) {
   switch (op) {
     default:
-    case FilterOperator::Equals: return a == b;
-    case FilterOperator::NotEquals: return a != b;
-    case FilterOperator::GreaterThan: return a > b;
-    case FilterOperator::GreaterThanOrEquals: return a >= b;
-    case FilterOperator::LessThan: return a < b;
-    case FilterOperator::LessThanOrEquals: return a <= b;
+    case FilterOperator::Equals:
+      return a == b;
+    case FilterOperator::NotEquals:
+      return a != b;
+    case FilterOperator::GreaterThan:
+      return a > b;
+    case FilterOperator::GreaterThanOrEquals:
+      return a >= b;
+    case FilterOperator::LessThan:
+      return a < b;
+    case FilterOperator::LessThanOrEquals:
+      return a <= b;
   }
 }
 
 QString elementValue(FilterElement element, const Item& item, const Context& context) {
   switch (element) {
-    case FilterElement::AnimeId: return QString::number(item.animeId);
-    case FilterElement::AnimeStatus: return QString::number(context.airingStatus);
-    case FilterElement::AnimeType: return QString::number(context.type);
-    case FilterElement::AnimeEpisodeCount: return QString::number(context.episodeCount);
-    case FilterElement::ListStatus: return QString::number(context.listStatus);
-    case FilterElement::ListNotes: return context.notes;
-    case FilterElement::EpisodeAvailable: return context.episodeAvailable ? u"1"_s : u"0"_s;
-    case FilterElement::AnimeTitle: return item.animeTitle;
+    case FilterElement::AnimeId:
+      return QString::number(item.animeId);
+    case FilterElement::AnimeStatus:
+      return QString::number(context.airingStatus);
+    case FilterElement::AnimeType:
+      return QString::number(context.type);
+    case FilterElement::AnimeEpisodeCount:
+      return QString::number(context.episodeCount);
+    case FilterElement::ListStatus:
+      return QString::number(context.listStatus);
+    case FilterElement::ListNotes:
+      return context.notes;
+    case FilterElement::EpisodeAvailable:
+      return context.episodeAvailable ? u"1"_s : u"0"_s;
+    case FilterElement::AnimeTitle:
+      return item.animeTitle;
     // Batches without a number count as the whole series, like v1.
     case FilterElement::EpisodeNumber:
       return QString::number(item.episode ? item.episode : context.episodeCount);
-    case FilterElement::EpisodeVersion: return QString::number(item.version);
-    case FilterElement::Group: return item.group;
-    case FilterElement::Resolution: return item.resolution;
-    case FilterElement::VideoType: return item.videoType;
-    case FilterElement::FileTitle: return item.title;
-    case FilterElement::FileCategory: return item.category;
-    case FilterElement::FileDescription: return item.description;
-    case FilterElement::FileLink: return item.link;
-    case FilterElement::FileSize: return QString::number(item.size);
+    case FilterElement::EpisodeVersion:
+      return QString::number(item.version);
+    case FilterElement::Group:
+      return item.group;
+    case FilterElement::Resolution:
+      return item.resolution;
+    case FilterElement::VideoType:
+      return item.videoType;
+    case FilterElement::FileTitle:
+      return item.title;
+    case FilterElement::FileCategory:
+      return item.category;
+    case FilterElement::FileDescription:
+      return item.description;
+    case FilterElement::FileLink:
+      return item.link;
+    case FilterElement::FileSize:
+      return QString::number(item.size);
+    case FilterElement::DateStarted:
+      return context.dateStarted;
+    case FilterElement::DateFinished:
+      return context.dateFinished;
   }
   return {};
 }
@@ -193,8 +220,8 @@ void applyFilters(QList<Item>& items, const QList<Filter>& filters, const Contex
       if (filter.matches(items[i], contexts[i])) continue;
 
       const bool strong = !filter.animeIds.isEmpty();
-      const bool betterExists = std::ranges::any_of(
-          std::views::iota(qsizetype{0}, items.size()), [&](qsizetype j) {
+      const bool betterExists =
+          std::ranges::any_of(std::views::iota(qsizetype{0}, items.size()), [&](qsizetype j) {
             return j != i && !items[j].isDiscarded() && sameRelease(items[i], items[j]) &&
                    filter.matches(items[j], contexts[j]);
           });
@@ -243,40 +270,72 @@ QList<Filter> defaultFilters() {
 
 QString elementName(FilterElement element) {
   switch (element) {
-    case FilterElement::AnimeId: return u"Anime ID"_s;
-    case FilterElement::AnimeStatus: return u"Airing status"_s;
-    case FilterElement::AnimeType: return u"Anime type"_s;
-    case FilterElement::AnimeEpisodeCount: return u"Episode count"_s;
-    case FilterElement::ListStatus: return u"List status"_s;
-    case FilterElement::ListNotes: return u"List notes"_s;
-    case FilterElement::EpisodeAvailable: return u"Episode available"_s;
-    case FilterElement::AnimeTitle: return u"Anime title"_s;
-    case FilterElement::EpisodeNumber: return u"Episode number"_s;
-    case FilterElement::EpisodeVersion: return u"Episode version"_s;
-    case FilterElement::Group: return u"Release group"_s;
-    case FilterElement::Resolution: return u"Video resolution"_s;
-    case FilterElement::VideoType: return u"Video type"_s;
-    case FilterElement::FileTitle: return u"File title"_s;
-    case FilterElement::FileCategory: return u"File category"_s;
-    case FilterElement::FileDescription: return u"File description"_s;
-    case FilterElement::FileLink: return u"File link"_s;
-    case FilterElement::FileSize: return u"File size"_s;
+    case FilterElement::AnimeId:
+      return u"Anime ID"_s;
+    case FilterElement::AnimeStatus:
+      return u"Airing status"_s;
+    case FilterElement::AnimeType:
+      return u"Anime type"_s;
+    case FilterElement::AnimeEpisodeCount:
+      return u"Episode count"_s;
+    case FilterElement::ListStatus:
+      return u"List status"_s;
+    case FilterElement::ListNotes:
+      return u"List notes"_s;
+    case FilterElement::EpisodeAvailable:
+      return u"Episode available"_s;
+    case FilterElement::AnimeTitle:
+      return u"Anime title"_s;
+    case FilterElement::EpisodeNumber:
+      return u"Episode number"_s;
+    case FilterElement::EpisodeVersion:
+      return u"Episode version"_s;
+    case FilterElement::Group:
+      return u"Release group"_s;
+    case FilterElement::Resolution:
+      return u"Video resolution"_s;
+    case FilterElement::VideoType:
+      return u"Video type"_s;
+    case FilterElement::FileTitle:
+      return u"File title"_s;
+    case FilterElement::FileCategory:
+      return u"File category"_s;
+    case FilterElement::FileDescription:
+      return u"File description"_s;
+    case FilterElement::FileLink:
+      return u"File link"_s;
+    case FilterElement::FileSize:
+      return u"File size"_s;
+    case FilterElement::DateStarted:
+      return u"Release start date"_s;
+    case FilterElement::DateFinished:
+      return u"Release end date"_s;
   }
   return {};
 }
 
 QString operatorName(FilterOperator op) {
   switch (op) {
-    case FilterOperator::Equals: return u"is"_s;
-    case FilterOperator::NotEquals: return u"is not"_s;
-    case FilterOperator::GreaterThan: return u"is greater than"_s;
-    case FilterOperator::GreaterThanOrEquals: return u"is greater than or equal to"_s;
-    case FilterOperator::LessThan: return u"is less than"_s;
-    case FilterOperator::LessThanOrEquals: return u"is less than or equal to"_s;
-    case FilterOperator::BeginsWith: return u"begins with"_s;
-    case FilterOperator::EndsWith: return u"ends with"_s;
-    case FilterOperator::Contains: return u"contains"_s;
-    case FilterOperator::NotContains: return u"doesn't contain"_s;
+    case FilterOperator::Equals:
+      return u"is"_s;
+    case FilterOperator::NotEquals:
+      return u"is not"_s;
+    case FilterOperator::GreaterThan:
+      return u"is greater than"_s;
+    case FilterOperator::GreaterThanOrEquals:
+      return u"is greater than or equal to"_s;
+    case FilterOperator::LessThan:
+      return u"is less than"_s;
+    case FilterOperator::LessThanOrEquals:
+      return u"is less than or equal to"_s;
+    case FilterOperator::BeginsWith:
+      return u"begins with"_s;
+    case FilterOperator::EndsWith:
+      return u"ends with"_s;
+    case FilterOperator::Contains:
+      return u"contains"_s;
+    case FilterOperator::NotContains:
+      return u"doesn't contain"_s;
   }
   return {};
 }

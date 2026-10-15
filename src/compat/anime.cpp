@@ -29,9 +29,9 @@
 
 namespace compat::v1 {
 
-Anime parseAnimeElement(QXmlStreamReader& xml);
+Anime parseAnimeElement(QXmlStreamReader& xml, const std::string& service);
 
-QList<Anime> readAnimeDatabase(const std::string& path) {
+QList<Anime> readAnimeDatabase(const std::string& path, const std::string& service) {
   base::XmlFileReader xml;
 
   if (!xml.open(QString::fromStdString(path), removeMetaElement)) {
@@ -46,7 +46,8 @@ QList<Anime> readAnimeDatabase(const std::string& path) {
   QList<Anime> db;
 
   while (xml.readElement(u"anime")) {
-    db.emplace_back(parseAnimeElement(xml));
+    auto item = parseAnimeElement(xml, service);
+    if (item.id > 0) db.append(std::move(item));
   }
 
   if (xml.hasError()) {
@@ -56,13 +57,20 @@ QList<Anime> readAnimeDatabase(const std::string& path) {
   return db;
 }
 
-Anime parseAnimeElement(QXmlStreamReader& xml) {
+Anime parseAnimeElement(QXmlStreamReader& xml, const std::string& service) {
   Anime anime;
+  int legacyId = 0;
+  bool namedIds = false;
 
   while (xml.readNextStartElement()) {
     if (xml.name() == u"id") {
-      // @TODO: Store ID from current `source`
-      anime.id = XML_ELEMENT.toInt();
+      const auto name = xml.attributes().value(u"name").toString();
+      const int id = XML_ELEMENT.toInt();
+      namedIds |= !name.isEmpty();
+      if (name == QString::fromStdString(service))
+        anime.id = id;
+      else if (name.isEmpty())
+        legacyId = id;
 
     } else if (xml.name() == u"slug") {
       anime.slug = XML_ELEMENT.toStdString();
@@ -141,6 +149,7 @@ Anime parseAnimeElement(QXmlStreamReader& xml) {
     }
   }
 
+  if (!namedIds) anime.id = legacyId;
   return anime;
 }
 

@@ -35,9 +35,9 @@ Status: **Done**, **Partial** (works, thinner than v1), **Skipped** (with the re
 
 | Feature | Status | Notes |
 |---|---|---|
-| Statistics | Done | Responsive chart dashboard: Overview, Ratings, Taste, Timeline and searchable Titles; MAL comparisons, sample cutoffs, completion dates, backlog/repeats, keyboard drill-down and CSV export |
+| Statistics | Done | Responsive chart dashboard: Overview, Ratings, Taste, Timeline, local Activity and searchable Titles; MAL comparisons, sample cutoffs, completion dates, backlog/repeats, keyboard drill-down and CSV export |
 | Torrents / RSS | Done | Source + search feeds, v1 filters and presets, filter editor, quick filters, archive, auto-check with notify/download, torrent app with `%file%`/`%folder%` |
-| Seasons | Partial | One-click previous/current/next season on Search. No grouped view; sort by type instead. |
+| Seasons | Done | Previous/current/next shortcuts show all formats, grouped by format, with one search request |
 | Profile links | Done | Toolbar menu, per service |
 | External links | Done | Editable in Application → Links |
 | Home / Now Playing page | Skipped | Now Playing already shows as a bar; the Home page is still Eren's placeholder |
@@ -125,17 +125,19 @@ behavior. “Present” here means implemented, not that every live-service work
 |---|---|---|
 | Field-based list search | Restored | `media/anime_query.*`; id, eps, title, genre, producer/studio, tag, note, type, season, year, rewatch, duration, score, average, status. Internal v1 debug queries omitted. |
 | Batch episode, score, status, notes and date actions | Present | `gui/media/media_menu.cpp`; multi-selection, date clearing and dates from airing/last update. |
-| Selection and keyboard actions | Partial | Extended selection, Ctrl+A, configurable mouse actions, invert selection and menu Delete are present. v1 Enter follows the double-click action; current Enter opens details. Delete outside the menu and v1 Ctrl+C, Ctrl+plus/minus, Ctrl+digits, Ctrl+O/N/R shortcuts are missing. Source comparison: v1 `dlg_anime_list.cpp` lines 851-935 versus current list view/base. |
+| Selection and keyboard actions | Restored | List and cards share configured Enter, confirmed Delete, Ctrl+C, current-episode Ctrl+plus/minus, selected-score Ctrl+digits, and Ctrl+O/N/R. Existing Ctrl+A, extended selection and invert selection remain available. |
 | List columns, header persistence and cards | Present | `gui/common/anime_list_view*`; secondary title sorting and cached posters. |
-| Grouped results by list status | Still missing | v1 shows status groups when searching across the list; current list is flat with sidebar status filtering. |
-| Season browsing | Partial | Search has season/year/type/status filters and previous/current/next shortcuts; v1's grouped season layout is absent. |
+| Grouped results by list status | Restored | Grouped view adds status headings while retaining the virtual flat model, search, sorting and selection. |
+| Season browsing | Restored | Season shortcuts clear the format filter and choose a view grouped by format; ordinary flat and card views remain available. |
 | Export | Present, service limits | Anime XML/Markdown and MAL manga XML/Markdown. Cross-service MAL-ID mapping remains incomplete. |
-| Import / migration | Partial | Existing v1 anime/list/history migration; sharing/RSS settings and service-ID mapping remain incomplete. Neither version's export should be described as an in-app import workflow. |
+| Import / migration | Restored for supported MAL workflows | v1 metadata selects the active service's named ID. Sharing, RSS sources/timers/filter shortcodes/custom app, mouse actions and supported application preferences migrate. Existing installations fill missing options once while preserving explicit choices and account credentials. Malformed files do not partially replace settings. This remains migration, not an interactive import workflow. |
 | Torrents and sharing | Present with omissions | Feed rules/presets/editor/archive/auto-download, Discord and HTTP announce. Legacy mIRC/Twitter stay low priority. |
-| v1 statistics | Expanded for account analysis | Account metrics exceed v1's totals and score histogram. v1's torrent-file counts and connection counters remain diagnostic omissions; cache size and uptime are retained. |
+| v1 statistics | Expanded for account analysis | Account metrics exceed v1's totals and score histogram. Local progress and score history drives an Activity page. Torrent-file and connection counters remain diagnostic omissions; cache controls live in Settings. |
 | Manga | Added beyond v1 | Manual MAL tracking, metadata cache, dates, export, statistics and durable retries. |
 
-The grouped list/season layouts and migration gaps remain explicit follow-up features; this
-work completes the account-statistics milestone and its performance/persistence checks.
+Grouped list and season layouts, shared v1 keyboard actions, incremental preference migration
+and local activity history are implemented. Non-MAL XML export refuses to substitute another
+provider's numeric IDs for MAL IDs. Legacy client-specific download-location automation,
+mIRC/Twitter, and recognition options marked Skipped above remain outside the supported workflows.
 
 Local large-list measurements and reproduction commands are in [docs/performance.md](docs/performance.md).

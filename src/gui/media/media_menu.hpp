@@ -42,6 +42,8 @@ public:
   ~MediaMenu() = default;
 
   void popup();
+  void removeFromList() const;
+  void playRandomEpisode() const;
 
 private slots:
   void addToList(const anime::list::Status status) const;
@@ -57,9 +59,7 @@ private slots:
   void matchNowPlaying() const;
   void openFolder() const;
   void playEpisode(int number) const;
-  void playRandomEpisode() const;
   void refresh() const;
-  void removeFromList() const;
   void search() const;
   void searchAniDB() const;
   void searchAniList() const;

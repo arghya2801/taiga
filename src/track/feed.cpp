@@ -58,14 +58,16 @@ Context contextFor(const Item& item) {
     context.episodeCount = anime->episode_count;
     context.airingStatus = static_cast<int>(anime::airingStatus(*anime));
     context.type = static_cast<int>(anime->type);
+    context.dateStarted = QString::fromStdString(anime->date_started.to_string());
+    context.dateFinished = QString::fromStdString(anime->date_finished.to_string());
   }
   if (const auto entry = anime::db.entry(item.animeId); entry && !entry->pending_delete) {
     context.watched = entry->watched_episodes;
     context.listStatus = static_cast<int>(entry->status);
     context.notes = QString::fromStdString(entry->notes);
   }
-  context.episodeAvailable = item.episode > 0 &&
-                             track::availableEpisodes.contains(item.animeId, item.episode);
+  context.episodeAvailable =
+      item.episode > 0 && track::availableEpisodes.contains(item.animeId, item.episode);
   return context;
 }
 
@@ -218,7 +220,7 @@ void Aggregator::download(const Item& item) {
   const auto open = [&](const QString& target) {
     if (app.isEmpty()) {
       QDesktopServices::openUrl(target.startsWith(u"magnet:") ? QUrl{target}
-                                                               : QUrl::fromLocalFile(target));
+                                                              : QUrl::fromLocalFile(target));
       return;
     }
     auto args = QProcess::splitCommand(taiga::opt::torrentAppArgs.get());

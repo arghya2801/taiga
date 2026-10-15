@@ -48,6 +48,8 @@ target_sources(taiga PRIVATE
 	media/anime_query.hpp
 	media/account_stats.cpp
 	media/account_stats.hpp
+	media/account_activity.cpp
+	media/account_activity.hpp
 	media/manga_io.cpp
 	media/manga_library.cpp
 	media/manga_library.hpp

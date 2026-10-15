@@ -23,15 +23,18 @@
 #include <QTreeWidget>
 
 #include "gui/common/anime_list_context.hpp"
+class QKeyEvent;
 
 namespace gui {
 
 class AnimeListModel;
 class AnimeListProxyModel;
+class MediaMenu;
 
 enum class ListViewMode {
   List,
   Cards,
+  Grouped,
 };
 
 class ListViewBase final : public QObject {
@@ -42,6 +45,7 @@ public:
   ListViewBase(QWidget* parent, QAbstractItemView* view, AnimeListModel* model,
                AnimeListProxyModel* proxyModel, AnimeListContext context);
   ~ListViewBase() = default;
+  bool handleKey(QKeyEvent* event);
 
   AnimeListContext context() const {
     return m_context;
@@ -57,6 +61,7 @@ public slots:
   void updateSelectionStatus(const QItemSelection& selected, const QItemSelection& deselected);
 
 private:
+  MediaMenu* selectionMenu();
   QModelIndexList selectedIndexes();
 
   AnimeListModel* m_model = nullptr;

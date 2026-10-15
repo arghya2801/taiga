@@ -117,12 +117,12 @@ void AnimeListModel::rebuildRows() {
   for (int row = 0; row < m_ids.size(); ++row) m_rows.insert(m_ids.at(row), row);
 }
 
-int AnimeListModel::rowCount(const QModelIndex&) const {
-  return m_ids.size();
+int AnimeListModel::rowCount(const QModelIndex& parent) const {
+  return parent.isValid() ? 0 : int(m_ids.size());
 }
 
-int AnimeListModel::columnCount(const QModelIndex&) const {
-  return NUM_COLUMNS;
+int AnimeListModel::columnCount(const QModelIndex& parent) const {
+  return parent.isValid() ? 0 : NUM_COLUMNS;
 }
 
 QVariant AnimeListModel::data(const QModelIndex& index, int role) const {
@@ -352,12 +352,12 @@ bool hasNewEpisode(const Anime& anime, const ListEntry* entry) {
 }
 
 const Anime* AnimeListModel::getAnime(const QModelIndex& index) const {
-  if (!index.isValid()) return nullptr;
+  if (!index.isValid() || index.row() < 0 || index.row() >= m_ids.size()) return nullptr;
   return anime::db.item(m_ids.at(index.row()));
 }
 
 const ListEntry* AnimeListModel::getListEntry(const QModelIndex& index) const {
-  if (!index.isValid()) return nullptr;
+  if (!index.isValid() || index.row() < 0 || index.row() >= m_ids.size()) return nullptr;
   return anime::db.entry(m_ids.at(index.row()));
 }
 

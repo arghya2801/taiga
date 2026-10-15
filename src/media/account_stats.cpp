@@ -92,22 +92,25 @@ Summary calculate(const QList<Record>& records, const Filter& filter, QDate toda
     if (!std::isfinite(r.communityScore) || r.communityScore < 0 || r.communityScore > 10)
       r.communityScore = 0;
     s.records.append(r);
-    const auto repeated = r.repeats * r.total;
-    const auto units = r.progress + repeated;
+    const auto completedRepeatUnits = r.repeats * r.total;
+    const auto repeated = completedRepeatUnits + (r.repeating ? r.progress : 0);
+    // Resetting progress for another pass must preserve the original completed pass.
+    const auto units = r.progress + completedRepeatUnits + (r.repeating ? r.total : 0);
     const auto seconds = units * std::max(r.minutesPerEpisode, 0) * 60;
     s.units += units;
     s.repeatUnits += repeated;
     s.repeatCount += r.repeats;
     s.secondaryUnits += std::max<qint64>(0, r.secondaryProgress);
     s.seconds += seconds;
-    s.repeatedTitles += r.repeats > 0;
+    s.repeatedTitles += r.repeats > 0 || r.repeating;
+    s.activeRepeats += r.repeating;
     s.completed += r.status == "Completed";
     s.dropped += r.status == "Dropped";
     s.unknownTotals += r.total <= 0;
     s.unknownDuration += r.minutesPerEpisode <= 0;
     s.estimatedDuration += r.estimatedDuration;
     s.unknownCompletionDates += r.status == "Completed" && r.completionYear.isEmpty();
-    const bool backlog = r.status != "Completed" && r.status != "Dropped";
+    const bool backlog = r.repeating || (r.status != "Completed" && r.status != "Dropped");
     if (backlog && r.total > 0) {
       const auto remaining = std::max<qint64>(0, r.total - r.progress);
       s.remainingUnits += remaining;
@@ -142,7 +145,7 @@ Summary calculate(const QList<Record>& records, const Filter& filter, QDate toda
         continue;
       if (d == Dimension::ScoreDifference && (r.score <= 0 || r.communityScore <= 0)) continue;
       if (d == Dimension::Progress &&
-          (r.total <= 0 || (r.status != "Watching" && r.status != "Reading" &&
+          (r.total <= 0 || (!r.repeating && r.status != "Watching" && r.status != "Reading" &&
                             r.status != "On hold" && r.status != "Paused")))
         continue;
       for (const auto& key : keys(r, d)) {
@@ -174,6 +177,47 @@ Summary calculate(const QList<Record>& records, const Filter& filter, QDate toda
   s.weightedMean = s.ratedUnits ? s.weightedMean / s.ratedUnits : 0;
   for (auto it = groups.begin(); it != groups.end(); ++it) s.groups[it.key()] = it.value().values();
   return s;
+}
+
+ActivitySummary calculateActivity(const QList<ActivityChange>& changes, const QSet<int>& ids) {
+  ActivitySummary result;
+  QMap<QString, Group> days, months;
+  for (const auto& change : changes) {
+    if (!ids.contains(change.mediaId) || !change.time.isValid() || change.progress < 0 ||
+        change.previousProgress < 0 || !std::isfinite(change.score) ||
+        !std::isfinite(change.previousScore) || change.score < 0 || change.score > 10 ||
+        change.previousScore < 0 || change.previousScore > 10)
+      continue;
+    if (change.progress == change.previousProgress && change.score == change.previousScore)
+      continue;
+    const auto date = change.time.toLocalTime().date();
+    result.changes.append(change);
+    if (!result.firstDate.isValid() || date < result.firstDate) result.firstDate = date;
+    const auto added = std::max<qint64>(0, change.progress - change.previousProgress);
+    result.addedUnits += added;
+    result.scoreChanges += change.score != change.previousScore;
+    if (!added) continue;
+    const auto add = [&](QMap<QString, Group>& groups, const QString& key) {
+      auto& group = groups[key];
+      group.name = key;
+      group.units += added;
+      group.ids.append(change.mediaId);
+    };
+    add(days, date.toString(Qt::ISODate));
+    add(months, date.toString("yyyy-MM"));
+  }
+  for (auto* groups : {&days, &months})
+    for (auto& group : *groups) {
+      const QSet<int> unique(group.ids.begin(), group.ids.end());
+      group.ids = unique.values();
+      std::sort(group.ids.begin(), group.ids.end());
+    }
+  result.days = days.values();
+  result.months = months.values();
+  std::stable_sort(result.changes.begin(), result.changes.end(), [](const auto& a, const auto& b) {
+    return a.time != b.time ? a.time > b.time : a.id > b.id;
+  });
+  return result;
 }
 
 }  // namespace stats

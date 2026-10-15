@@ -31,9 +31,9 @@ namespace track::feed {
 
 enum class ItemState {
   Normal,
-  Selected,     // will be downloaded
-  Discarded,    // shown greyed out
-  Hidden,       // discarded and not shown
+  Selected,   // will be downloaded
+  Discarded,  // shown greyed out
+  Hidden,     // discarded and not shown
 };
 
 struct Item {
@@ -70,6 +70,7 @@ struct Context {
   int type = 0;
   QString notes;
   bool episodeAvailable = false;
+  QString dateStarted, dateFinished;
 };
 
 enum class FilterElement {
@@ -91,6 +92,8 @@ enum class FilterElement {
   FileDescription,
   FileLink,
   FileSize,
+  DateStarted,
+  DateFinished,
 };
 
 enum class FilterOperator {

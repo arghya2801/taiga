@@ -62,12 +62,30 @@ void ListItemDelegate::setModelData(QWidget* editor, QAbstractItemModel* model,
 }
 
 void ListItemDelegate::updateEditorGeometry(QWidget* editor, const QStyleOptionViewItem& option,
-                                            const QModelIndex&) const {
-  editor->setGeometry(option.rect);
+                                            const QModelIndex& index) const {
+  auto rect = option.rect;
+  if (!index.data(int(AnimeListItemDataRole::GroupHeading)).toString().isEmpty())
+    rect.adjust(0, 30, 0, 0);
+  editor->setGeometry(rect);
 }
 
-void ListItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option,
+void ListItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& original,
                              const QModelIndex& index) const {
+  auto option = original;
+  const auto group = index.data(int(AnimeListItemDataRole::GroupHeading)).toString();
+  if (!group.isEmpty()) {
+    const PainterStateSaver state(painter);
+    QRect heading(option.rect.left(), option.rect.top(), option.rect.width(), 30);
+    painter->fillRect(heading, theme.color(Theme::Color::Raised));
+    if (index.column() == AnimeListModel::COLUMN_TITLE) {
+      auto font = option.font;
+      font.setBold(true);
+      painter->setFont(font);
+      painter->setPen(theme.color(Theme::Color::Text));
+      painter->drawText(heading.adjusted(5, 0, -5, 0), Qt::AlignLeft | Qt::AlignVCenter, group);
+    }
+    option.rect.adjust(0, 30, 0, 0);
+  }
   // Grid lines
   if (index.column() > 0) {
     const PainterStateSaver painterStateSaver(painter);
@@ -84,9 +102,15 @@ void ListItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
       // Same meaning as v1's squares: airing, not yet aired, finished.
       QColor color;
       switch (anime::airingStatus(*anime)) {
-        case anime::Status::Airing: color = theme.color(Theme::Color::Progress); break;
-        case anime::Status::NotYetAired: color = theme.color(Theme::Color::Available); break;
-        default: color = theme.color(Theme::Color::Faint); break;
+        case anime::Status::Airing:
+          color = theme.color(Theme::Color::Progress);
+          break;
+        case anime::Status::NotYetAired:
+          color = theme.color(Theme::Color::Available);
+          break;
+        default:
+          color = theme.color(Theme::Color::Faint);
+          break;
       }
       const PainterStateSaver painterStateSaver(painter);
       painter->setRenderHint(QPainter::Antialiasing);
@@ -116,7 +140,8 @@ void ListItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
 QSize ListItemDelegate::sizeHint(const QStyleOptionViewItem& option,
                                  const QModelIndex& index) const {
   if (index.isValid()) {
-    return QSize(0, 24);
+    return QSize(
+        0, index.data(int(AnimeListItemDataRole::GroupHeading)).toString().isEmpty() ? 24 : 54);
   }
 
   return QStyledItemDelegate::sizeHint(option, index);

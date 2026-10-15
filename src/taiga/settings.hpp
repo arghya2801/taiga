@@ -89,6 +89,9 @@ public:
     if (const auto it = optionCache_.constFind(name); it != optionCache_.cend()) return *it;
     return *optionCache_.insert(name, value(key, defaultValue));
   }
+  bool hasOption(QAnyStringView key) const {
+    return settings().contains(key);
+  }
   void setOption(QAnyStringView key, const QVariant& value) const {
     const QMutexLocker lock{&optionMutex_};
     optionCache_.insert(key.toString(), value);

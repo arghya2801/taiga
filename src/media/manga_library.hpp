@@ -20,6 +20,7 @@ public:
   Library();
   ~Library();
   void init();
+  void flush();
   void refresh();
   const QHash<int, Entry>& entries() const {
     return entries_;

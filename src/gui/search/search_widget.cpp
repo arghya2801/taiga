@@ -21,6 +21,7 @@
 #include <QActionGroup>
 #include <QDate>
 #include <QLineEdit>
+#include <QSignalBlocker>
 #include <QToolBar>
 #include <QToolButton>
 
@@ -187,18 +188,29 @@ SearchWidget::SearchWidget(QWidget* parent)
     connect(seasonMenu, &QMenu::aboutToShow, this, [this, seasonMenu] {
       seasonMenu->clear();
       const auto today = QDate::currentDate();
-      const anime::Season current{FuzzyDate{std::chrono::year{today.year()},
-                                            std::chrono::month{static_cast<unsigned>(today.month())},
-                                            std::chrono::day{static_cast<unsigned>(today.day())}}};
+      const anime::Season current{FuzzyDate{
+          std::chrono::year{today.year()}, std::chrono::month{static_cast<unsigned>(today.month())},
+          std::chrono::day{static_cast<unsigned>(today.day())}}};
       auto previous = current;
       auto next = current;
       --previous;
       ++next;
       const auto add = [this, seasonMenu](const QString& label, const anime::Season& season) {
         seasonMenu->addAction(u"%1 (%2)"_s.arg(label, formatSeason(season)), this, [this, season] {
-          m_comboYear->setCurrentIndex(
-              m_comboYear->findData(static_cast<int>(season.year)));
+          const QSignalBlocker yearBlock(m_comboYear), seasonBlock(m_comboSeason),
+              typeBlock(m_comboType);
+          m_comboYear->setCurrentIndex(m_comboYear->findData(static_cast<int>(season.year)));
           m_comboSeason->setCurrentIndex(m_comboSeason->findData(static_cast<int>(season.name)));
+          m_comboType->setCurrentIndex(-1);
+          mainWindow()->searchBox()->clear();
+          auto filters = m_proxyModel->filters();
+          filters.year = int(season.year);
+          filters.season = int(season.name);
+          filters.type.reset();
+          filters.text.clear();
+          m_proxyModel->setFilters(filters);
+          setViewMode(ListViewMode::Grouped);
+          performSearch();
         });
       };
       add(tr("Previous season"), previous);
@@ -296,6 +308,7 @@ void SearchWidget::initViewMenu() {
   static const QList<QPair<QString, ListViewMode>> items{
       {"List", ListViewMode::List},
       {"Cards", ListViewMode::Cards},
+      {"Grouped", ListViewMode::Grouped},
   };
 
   const auto actionGroup = new QActionGroup(this);
@@ -323,11 +336,15 @@ void SearchWidget::setViewMode(ListViewMode mode) {
   }
 
   m_viewMode = mode;
+  m_proxyModel->setGrouping(mode == ListViewMode::Grouped ? AnimeListGrouping::Type
+                                                          : AnimeListGrouping::None);
 
   switch (mode) {
     case ListViewMode::List:
+    case ListViewMode::Grouped:
       m_listView = new ListView(this, m_model, m_proxyModel, AnimeListContext::Search);
       layout()->addWidget(m_listView);
+      m_listView->setUniformRowHeights(mode != ListViewMode::Grouped);
       m_listView->show();
       break;
 

@@ -41,7 +41,7 @@ using namespace track::feed;
 
 namespace {
 
-constexpr int kElementCount = static_cast<int>(FilterElement::FileSize) + 1;
+constexpr int kElementCount = static_cast<int>(FilterElement::DateFinished) + 1;
 constexpr int kOperatorCount = static_cast<int>(FilterOperator::NotContains) + 1;
 
 QString describe(const Filter& filter) {
