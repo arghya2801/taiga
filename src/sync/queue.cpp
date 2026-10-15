@@ -51,11 +51,9 @@ void Queue::init() {
   periodicTimer_->start();
 
   auto db = QSqlDatabase::database();
-  if (!db.open()) return;
+  if (!db.isOpen() && !db.open()) return;
 
   const bool tableExists = db.tables().contains("queue");
-
-  db.close();
 
   if (!tableExists) {
     createTable();
@@ -233,10 +231,9 @@ bool Queue::hasItem(const int animeId) const {
 
 void Queue::clear() {
   auto db = QSqlDatabase::database();
-  if (db.open()) {
+  if (db.isOpen() || db.open()) {
     QSqlQuery q{db};
     q.exec("DELETE FROM queue");
-    db.close();
   }
 
   items_.clear();
@@ -258,19 +255,17 @@ QString Queue::sql(const QString& name) const {
 
 void Queue::createTable() {
   auto db = QSqlDatabase::database();
-  if (!db.open()) return;
+  if (!db.isOpen() && !db.open()) return;
 
   if (!db.tables().contains("queue")) {
     QSqlQuery q{db};
     q.exec(sql("createQueue"));
   }
-
-  db.close();
 }
 
 void Queue::readItems() {
   auto db = QSqlDatabase::database();
-  if (!db.open()) return;
+  if (!db.isOpen() && !db.open()) return;
 
   QSqlQuery q{db};
   if (q.exec("SELECT * FROM queue ORDER BY time ASC")) {
@@ -278,33 +273,27 @@ void Queue::readItems() {
       items_.append(itemFromQuery(q));
     }
   }
-
-  db.close();
 }
 
 void Queue::persistItem(const QueueItem& item) {
   auto db = QSqlDatabase::database();
-  if (!db.open()) return;
+  if (!db.isOpen() && !db.open()) return;
 
   QSqlQuery q{db};
   if (q.prepare(sql("insertQueue"))) {
     bindItemToQuery(item, q);
     q.exec();
   }
-
-  db.close();
 }
 
 void Queue::deleteItem(const int animeId) {
   auto db = QSqlDatabase::database();
-  if (!db.open()) return;
+  if (!db.isOpen() && !db.open()) return;
 
   QSqlQuery q{db};
   q.prepare("DELETE FROM queue WHERE anime_id = :anime_id");
   q.bindValue(":anime_id", animeId);
   q.exec();
-
-  db.close();
 }
 
 void Queue::bindItemToQuery(const QueueItem& item, QSqlQuery& q) const {

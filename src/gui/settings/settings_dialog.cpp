@@ -98,8 +98,9 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent), ui_(new Ui::S
         [startWithWindows] {
           QSettings run{kWindowsRunKey, QSettings::NativeFormat};
           if (startWithWindows->isChecked()) {
-            run.setValue("Taiga", u"\"%1\""_s.arg(QDir::toNativeSeparators(
-                                      QCoreApplication::applicationFilePath())));
+            run.setValue(
+                "Taiga",
+                u"\"%1\""_s.arg(QDir::toNativeSeparators(QCoreApplication::applicationFilePath())));
           } else {
             run.remove("Taiga");
           }
@@ -121,8 +122,9 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent), ui_(new Ui::S
         tr("External links:"), links,
         [links] { links->setPlainText(taiga::opt::externalLinks.get()); },
         [links] { taiga::opt::externalLinks.set(links->toPlainText().trimmed()); });
-    linksPage->addNote(tr("Shown in the profile menu. One \"Name|URL\" per line, and a line "
-                          "with just - for a separator."));
+    linksPage->addNote(
+        tr("Shown in the profile menu. One \"Name|URL\" per line, and a line "
+           "with just - for a separator."));
   }
 
   auto* notificationsPage = new SettingsPageOptions(ui_, this);
@@ -150,9 +152,8 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent), ui_(new Ui::S
   auto* animeListPage = new SettingsPageOptions(ui_, this);
   {
     using namespace taiga::opt;
-    const QStringList actions{tr("View details"),      tr("Edit list entry"),
-                              tr("Play next episode"), tr("Open folder"),
-                              tr("Open anime page"),   tr("Do nothing")};
+    const QStringList actions{tr("View details"), tr("Edit list entry"), tr("Play next episode"),
+                              tr("Open folder"),  tr("Open anime page"), tr("Do nothing")};
     animeListPage->addHeading(tr("Mouse actions"));
     animeListPage->addChoice(listDoubleClick, tr("Double-click:"), actions);
     animeListPage->addChoice(listMiddleClick, tr("Middle-click:"), actions);
@@ -252,9 +253,13 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent), ui_(new Ui::S
       auto* label = new QLabel(page);
       const auto update = [label] {
         label->setText(tr("Cached images use %1 on disk.")
-                           .arg(QLocale().formattedDataSize(imageProvider.cacheSize())));
+                           .arg(imageProvider.cacheSize() < 0
+                                    ? tr("Calculating...")
+                                    : QLocale().formattedDataSize(imageProvider.cacheSize())));
       };
+      connect(&imageProvider, &ImageProvider::cacheSizeChanged, page, [update] { update(); });
       update();
+      imageProvider.refreshCacheSize();
       auto* button = new QPushButton(tr("Clear cache"), page);
       connect(button, &QPushButton::clicked, page, [update] {
         imageProvider.clearCache();

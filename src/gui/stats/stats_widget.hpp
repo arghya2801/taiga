@@ -17,33 +17,58 @@
  */
 
 #pragma once
+#include <QTimer>
 
 #include "gui/common/page_widget.hpp"
-
+#include "media/account_stats.hpp"
 class QLabel;
-
+class QComboBox;
+class QSpinBox;
+class QTableView;
+class QSortFilterProxyModel;
+class QTabWidget;
+class QLineEdit;
+class QPushButton;
 namespace gui {
-
-class ScoreChart;
-
+class StatsTitlesModel;
+class StatsChart;
 class StatsWidget final : public PageWidget {
   Q_OBJECT
   Q_DISABLE_COPY_MOVE(StatsWidget)
-
 public:
-  StatsWidget(QWidget* parent);
-  ~StatsWidget() = default;
+  explicit StatsWidget(QWidget* parent);
 
 protected:
   void showEvent(QShowEvent* event) override;
 
 private:
+  void invalidate();
   void refresh();
-
-  QLabel* m_listLabel = nullptr;
-  QLabel* m_scoreLabel = nullptr;
-  QLabel* m_dataLabel = nullptr;
-  ScoreChart* m_chart = nullptr;
+  void render();
+  void renderGroups();
+  void renderTimeline();
+  void showTitles(const QList<int>& ids = {}, const QString& label = {}, bool all = true);
+  void drillDown(const QList<int>& ids, const QString& label);
+  QList<stats::Record> snapshot() const;
+  void updateChoices(const QList<stats::Record>& records);
+  QComboBox *kind_, *status_, *format_, *year_, *genre_, *studio_, *dimension_, *ranking_,
+      *timelineYear_;
+  QSpinBox* minimum_;
+  QLabel *overview_, *scores_, *comparison_, *coverage_, *selection_, *timelineNote_, *tasteNote_,
+      *backlog_, *repeats_;
+  QList<QLabel*> values_, notes_;
+  QTabWidget* tabs_;
+  QLineEdit* search_;
+  QPushButton* showAllGroups_;
+  QList<StatsChart*> charts_;
+  StatsChart* drillSource_ = nullptr;
+  int previousTab_ = 0;
+  QTableView* titlesView_;
+  StatsTitlesModel* titlesModel_;
+  QSortFilterProxyModel* titlesProxy_;
+  stats::Summary summary_;
+  QTimer debounce_;
+  quint64 revision_ = 0;
+  bool dirty_ = true, calculating_ = false;
 };
-
 }  // namespace gui

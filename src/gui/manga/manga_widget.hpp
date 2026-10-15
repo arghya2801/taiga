@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QHash>
+#include <QPersistentModelIndex>
 
 #include "gui/common/page_widget.hpp"
 #include "media/manga.hpp"
@@ -19,8 +20,7 @@ public:
 
 private:
   void refresh();
-  void loadCache();
-  void saveCache() const;
+  void updateRow(int id);
   void search();
   void populate();
   void updateCounts();
@@ -33,7 +33,7 @@ private:
   int selectedId() const;
   const manga::Entry* selectedEntry() const;
 
-  QHash<int, manga::Entry> library_;
+  QHash<int, QPersistentModelIndex> rows_;
   QHash<int, manga::Entry> results_;
   bool showingResults_ = false;
   QString currentStatus_;

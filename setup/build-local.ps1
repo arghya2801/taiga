@@ -47,11 +47,14 @@ try {
 
   & $cmake -S $root -B $build -G 'Visual Studio 17 2022' -A x64 "-DCMAKE_PREFIX_PATH=$qt"
   if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed.' }
-  & $cmake --build $build --config RelWithDebInfo --target taiga --parallel 6
+  & $cmake --build $build --config RelWithDebInfo --target taiga taiga-checks --parallel 6
   if ($LASTEXITCODE -ne 0) { throw 'Taiga build failed.' }
 
   & (Join-Path $qt 'bin\windeployqt.exe') --release --no-translations $exe
   if ($LASTEXITCODE -ne 0) { throw 'Qt runtime deployment failed.' }
+
+  & (Join-Path (Split-Path $exe) 'taiga-checks.exe')
+  if ($LASTEXITCODE -ne 0) { throw 'Taiga self-checks failed.' }
 
   Write-Host "Built $exe"
   if ($Run) {

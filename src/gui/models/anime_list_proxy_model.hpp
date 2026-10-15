@@ -18,8 +18,11 @@
 
 #pragma once
 
+#include <QHash>
 #include <QSortFilterProxyModel>
 #include <optional>
+
+#include "media/anime_query.hpp"
 
 namespace gui {
 
@@ -60,10 +63,15 @@ protected:
   bool lessThan(const QModelIndex& lhs, const QModelIndex& rhs) const override;
 
 private:
-  bool columnLessThan(const QModelIndex& lhs, const QModelIndex& rhs) const;
+  bool columnLessThan(int column, const Anime* lhs_anime, const Anime* rhs_anime,
+                      const ListEntry* lhs_entry, const ListEntry* rhs_entry) const;
+  QString cachedTitle(const Anime& anime) const;
+  mutable QHash<int, QString> titles_;
+  mutable anime::TitleLanguage titleLanguage_ = anime::TitleLanguage::Romaji;
 
 private:
   AnimeListProxyModelFilter m_filter;
+  anime::Query m_query;
 };
 
 }  // namespace gui

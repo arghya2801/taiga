@@ -91,17 +91,36 @@ QPixmap ImageProvider::loadCover(const int mangaId, const QString& url) {
 }
 
 qint64 ImageProvider::cacheSize() const {
-  qint64 size = 0;
-  for (QDirIterator it{cacheRoot(), QDir::Files, QDirIterator::Subdirectories}; it.hasNext();) {
-    size += it.nextFileInfo().size();
-  }
-  return size;
+  return m_cacheSize;
+}
+
+void ImageProvider::refreshCacheSize() {
+  if (m_scanningCache) return;
+  m_scanningCache = true;
+  const auto generation = m_cacheGeneration;
+  QtConcurrent::run([root = cacheRoot()] {
+    qint64 size = 0;
+    for (QDirIterator it{root, QDir::Files, QDirIterator::Subdirectories}; it.hasNext();)
+      size += it.nextFileInfo().size();
+    return size;
+  }).then(this, [this, generation](qint64 size) {
+    m_scanningCache = false;
+    if (generation != m_cacheGeneration) {
+      refreshCacheSize();
+      return;
+    }
+    m_cacheSize = size;
+    emit cacheSizeChanged(size);
+  });
 }
 
 void ImageProvider::clearCache() {
   QDir{cacheRoot()}.removeRecursively();
   QPixmapCache::clear();
   m_retryAfter.clear();
+  ++m_cacheGeneration;
+  m_cacheSize = 0;
+  emit cacheSizeChanged(0);
 }
 
 QPixmap ImageProvider::load(const Kind kind, const int id, const QString& url) {

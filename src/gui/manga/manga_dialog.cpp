@@ -2,6 +2,7 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDate>
 #include <QDesktopServices>
 #include <QDialogButtonBox>
 #include <QFormLayout>
@@ -11,6 +12,7 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QScrollArea>
 #include <QSpinBox>
 #include <QTabWidget>
@@ -140,6 +142,14 @@ MangaDialog::MangaDialog(QWidget* parent, manga::Entry entry)
   priorityBox_->addItem(tr("High"), 2);
   priorityBox_->setCurrentIndex(entry_.priority);
   form->addRow(tr("Priority"), priorityBox_);
+  startedEdit_ = new QLineEdit(entry_.startedReading, listContent);
+  finishedEdit_ = new QLineEdit(entry_.finishedReading, listContent);
+  for (auto* edit : {startedEdit_, finishedEdit_}) {
+    edit->setPlaceholderText(tr("YYYY-MM-DD; leave empty if unknown"));
+    edit->setToolTip(tr("Partial dates may use 00 for an unknown month or day."));
+  }
+  form->addRow(tr("Started reading"), startedEdit_);
+  form->addRow(tr("Finished reading"), finishedEdit_);
   tagsEdit_ = new QLineEdit(entry_.tags.join(", "), listContent);
   tagsEdit_->setPlaceholderText(tr("Separate tags with commas"));
   form->addRow(tr("Tags"), tagsEdit_);
@@ -167,15 +177,32 @@ MangaDialog::MangaDialog(QWidget* parent, manga::Entry entry)
   if (entry_.onList) {
     auto* removeButton = buttons->addButton(tr("Remove"), QDialogButtonBox::DestructiveRole);
     connect(removeButton, &QPushButton::clicked, this, [this] {
-      if (QMessageBox::question(this, tr("Remove manga"),
-                                tr("Remove %1 from your MyAnimeList manga list?")
-                                    .arg(entry_.title)) != QMessageBox::Yes)
+      if (QMessageBox::question(
+              this, tr("Remove manga"),
+              tr("Remove %1 from your MyAnimeList manga list?").arg(entry_.title)) !=
+          QMessageBox::Yes)
         return;
       removeRequested_ = true;
       accept();
     });
   }
-  connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
+  connect(buttons, &QDialogButtonBox::accepted, this, [this] {
+    for (auto* edit : {startedEdit_, finishedEdit_}) {
+      const auto text = edit->text().trimmed();
+      if (text.isEmpty()) continue;
+      const QRegularExpression pattern(QStringLiteral("^[0-9]{4}-[0-9]{2}-[0-9]{2}$"));
+      const int year = text.left(4).toInt(), month = text.mid(5, 2).toInt(),
+                day = text.right(2).toInt();
+      if (!pattern.match(text).hasMatch() || year < 1 || month > 12 || day > 31 ||
+          (!month && day) || (month && day && !QDate(year, month, day).isValid())) {
+        QMessageBox::information(this, tr("Reading dates"),
+                                 tr("Enter a valid YYYY-MM-DD date or leave it empty."));
+        edit->setFocus();
+        return;
+      }
+    }
+    accept();
+  });
   connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
   root->addWidget(buttons);
 
@@ -194,7 +221,8 @@ MangaDialog::MangaDialog(QWidget* parent, manga::Entry entry)
     if (id != entry_.id) return;
     poster_->setLoading(false);
     if (entry_.synopsis.isEmpty())
-      synopsis_->setPlainText(tr("Couldn't load details from MyAnimeList. You can still edit your list entry."));
+      synopsis_->setPlainText(
+          tr("Couldn't load details from MyAnimeList. You can still edit your list entry."));
   });
   service->fetchMangaDetails(entry_.id);
 }
@@ -215,6 +243,8 @@ manga::Entry MangaDialog::editedEntry() const {
     if (!trimmed.isEmpty()) edited.tags.append(trimmed);
   }
   edited.comments = commentsEdit_->toPlainText();
+  edited.startedReading = startedEdit_->text().trimmed();
+  edited.finishedReading = finishedEdit_->text().trimmed();
   return edited;
 }
 
@@ -247,7 +277,7 @@ void MangaDialog::showDetails(const manga::Entry& details) {
   add(tr("Genres"), details.genres.join(", "));
   add(tr("Authors"), details.authors.join(", "));
   synopsis_->setPlainText(details.synopsis.isEmpty() ? tr("No synopsis available.")
-                                                      : details.synopsis);
+                                                     : details.synopsis);
   loadCover(details.coverUrl);
 }
 

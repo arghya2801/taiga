@@ -44,6 +44,8 @@ private:
   QSpinBox* timesRereadSpin_ = nullptr;
   QSpinBox* rereadValueSpin_ = nullptr;
   QComboBox* priorityBox_ = nullptr;
+  QLineEdit* startedEdit_ = nullptr;
+  QLineEdit* finishedEdit_ = nullptr;
   QLineEdit* tagsEdit_ = nullptr;
   QPlainTextEdit* commentsEdit_ = nullptr;
 };

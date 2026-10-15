@@ -296,4 +296,16 @@ void pruneMissingEntries(const QSet<int>& fetchedIds) {
   }
 }
 
+void applyFetchedEntries(const QList<ListEntry>& entries) {
+  QList<ListEntry> accepted;
+  accepted.reserve(entries.size());
+  for (const auto& entry : entries) {
+    if (queue.hasItem(entry.anime_id)) continue;
+    const auto* local = anime::db.entry(entry.anime_id);
+    if (local && local->last_updated > entry.last_updated) continue;
+    accepted.append(entry);
+  }
+  anime::db.updateEntries(accepted);
+}
+
 }  // namespace sync

@@ -20,6 +20,7 @@
 
 #include <QCoreApplication>
 #include <QStandardPaths>
+#include <QVariant>
 #include <format>
 
 #include "taiga/config.h"
@@ -28,6 +29,9 @@ namespace taiga {
 
 // Returns current path in portable mode, AppData location otherwise
 std::string get_data_path() {
+#ifdef TAIGA_TESTING
+  return QCoreApplication::instance()->property("taiga.testDataPath").toString().toStdString();
+#endif
 #ifdef TAIGA_PORTABLE
   return std::format("{}/data", QCoreApplication::applicationDirPath().toStdString());
 #else

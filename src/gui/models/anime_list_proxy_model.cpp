@@ -23,25 +23,13 @@
 #include "base/string.hpp"
 #include "gui/models/anime_list_model.hpp"
 #include "media/anime.hpp"
+#include "media/anime_db.hpp"
 #include "media/anime_list.hpp"
 #include "media/anime_list_utils.hpp"
 #include "media/anime_season.hpp"
 #include "media/anime_utils.hpp"
 #include "taiga/options.hpp"
-
-namespace {
-
-const Anime* getAnime(const QModelIndex& index) {
-  const int role = static_cast<int>(gui::AnimeListItemDataRole::Anime);
-  return index.data(role).value<const Anime*>();
-}
-
-const ListEntry* getListEntry(const QModelIndex& index) {
-  const int role = static_cast<int>(gui::AnimeListItemDataRole::ListEntry);
-  return index.data(role).value<const ListEntry*>();
-}
-
-}  // namespace
+#include "taiga/settings.hpp"
 
 namespace gui {
 
@@ -51,6 +39,8 @@ AnimeListProxyModel::AnimeListProxyModel(QObject* parent) : QSortFilterProxyMode
 
   setSortCaseSensitivity(Qt::CaseInsensitive);
   setSortRole(Qt::UserRole);
+  connect(&anime::db, &anime::Database::itemUpdated, this, [this](int id) { titles_.remove(id); });
+  connect(&anime::db, &anime::Database::itemDeleted, this, [this](int id) { titles_.remove(id); });
 }
 
 const AnimeListProxyModelFilter& AnimeListProxyModel::filters() const {
@@ -60,6 +50,7 @@ const AnimeListProxyModelFilter& AnimeListProxyModel::filters() const {
 void AnimeListProxyModel::setFilters(const AnimeListProxyModelFilter& filters) {
   beginFilterChange();
   m_filter = filters;
+  m_query = anime::Query(filters.text);
   endFilterChange(QSortFilterProxyModel::Direction::Rows);
 }
 
@@ -96,6 +87,7 @@ void AnimeListProxyModel::setListStatusFilter(AnimeListStatusFilter filter) {
 void AnimeListProxyModel::setTextFilter(const QString& text) {
   beginFilterChange();
   m_filter.text = text;
+  m_query = anime::Query(text);
   endFilterChange(QSortFilterProxyModel::Direction::Rows);
 }
 
@@ -103,19 +95,9 @@ bool AnimeListProxyModel::filterAcceptsRow(int row, const QModelIndex& parent) c
   const auto model = static_cast<AnimeListModel*>(sourceModel());
   if (!model) return false;
   const auto index = model->index(row, 0, parent);
-  const auto anime = getAnime(index);
+  const auto anime = model->getAnime(index);
   if (!anime) return false;
-  const auto entry = getListEntry(index);
-
-  static const auto contains = [](const std::string& str, const QStringView view) {
-    return QString::fromStdString(str).contains(view, Qt::CaseInsensitive);
-  };
-
-  static const auto list_contains = [](const std::vector<std::string>& list,
-                                       const QStringView view) {
-    return std::ranges::any_of(list,
-                               [view](const std::string& str) { return contains(str, view); });
-  };
+  const auto entry = model->getListEntry(index);
 
   // Year
   if (m_filter.year) {
@@ -149,40 +131,32 @@ bool AnimeListProxyModel::filterAcceptsRow(int row, const QModelIndex& parent) c
     }
   }
 
-  // Titles
-  if (!m_filter.text.isEmpty()) {
-    if (!contains(anime->titles.romaji, m_filter.text) &&
-        !contains(anime->titles.english, m_filter.text) &&
-        !contains(anime->titles.japanese, m_filter.text) &&
-        !list_contains(anime->titles.synonyms, m_filter.text)) {
-      return false;
-    }
-  }
-
-  return true;
+  return m_query.matches(*anime, entry);
 }
 
 bool AnimeListProxyModel::lessThan(const QModelIndex& lhs, const QModelIndex& rhs) const {
-  const auto lhs_anime = getAnime(lhs);
-  const auto rhs_anime = getAnime(rhs);
+  const auto* model = static_cast<AnimeListModel*>(sourceModel());
+  const auto lhs_anime = model->getAnime(lhs);
+  const auto rhs_anime = model->getAnime(rhs);
+  const auto lhs_entry = model->getListEntry(lhs);
+  const auto rhs_entry = model->getListEntry(rhs);
   if (!lhs_anime || !rhs_anime) return false;
 
   const auto compareTitles = [&] {
-    return compareStrings(anime::preferredTitle(*lhs_anime), anime::preferredTitle(*rhs_anime),
-                          Qt::CaseInsensitive);
+    return cachedTitle(*lhs_anime).compare(cachedTitle(*rhs_anime), Qt::CaseInsensitive);
   };
 
   // Qt flips the result for descending sorts, so flip this too to keep new episodes on top.
   if (taiga::opt::newEpisodesOnTop.get()) {
-    const bool lhs_new = hasNewEpisode(*lhs_anime, getListEntry(lhs));
-    const bool rhs_new = hasNewEpisode(*rhs_anime, getListEntry(rhs));
+    const bool lhs_new = hasNewEpisode(*lhs_anime, lhs_entry);
+    const bool rhs_new = hasNewEpisode(*rhs_anime, rhs_entry);
     if (lhs_new != rhs_new) return (sortOrder() == Qt::AscendingOrder) == lhs_new;
   }
 
   if (lhs.column() == AnimeListModel::COLUMN_TITLE) return compareTitles() < 0;
 
-  if (columnLessThan(lhs, rhs)) return true;
-  if (columnLessThan(rhs, lhs)) return false;
+  if (columnLessThan(lhs.column(), lhs_anime, rhs_anime, lhs_entry, rhs_entry)) return true;
+  if (columnLessThan(rhs.column(), rhs_anime, lhs_anime, rhs_entry, lhs_entry)) return false;
 
   // Equal values fall back to the title, like v1's secondary sort. The title order is flipped
   // for descending sorts so it always reads A-Z.
@@ -190,15 +164,21 @@ bool AnimeListProxyModel::lessThan(const QModelIndex& lhs, const QModelIndex& rh
   return sortOrder() == Qt::AscendingOrder ? titles < 0 : titles > 0;
 }
 
-bool AnimeListProxyModel::columnLessThan(const QModelIndex& lhs, const QModelIndex& rhs) const {
-  const auto lhs_anime = getAnime(lhs);
-  const auto rhs_anime = getAnime(rhs);
+QString AnimeListProxyModel::cachedTitle(const Anime& item) const {
+  const auto language = taiga::settings.titleLanguage();
+  if (language != titleLanguage_) {
+    titles_.clear();
+    titleLanguage_ = language;
+  }
+  const auto it = titles_.constFind(item.id);
+  if (it != titles_.cend()) return *it;
+  return *titles_.insert(item.id, QString::fromStdString(anime::preferredTitle(item)));
+}
 
-  const auto lhs_entry = getListEntry(lhs);
-  const auto rhs_entry = getListEntry(rhs);
-
-  switch (lhs.column()) {
-
+bool AnimeListProxyModel::columnLessThan(int column, const Anime* lhs_anime, const Anime* rhs_anime,
+                                         const ListEntry* lhs_entry,
+                                         const ListEntry* rhs_entry) const {
+  switch (column) {
     case AnimeListModel::COLUMN_DURATION:
       return lhs_anime->episode_length < rhs_anime->episode_length;
 
@@ -206,10 +186,14 @@ bool AnimeListProxyModel::columnLessThan(const QModelIndex& lhs, const QModelInd
       // Airing first, then upcoming, then finished, like v1.
       const auto rank = [](const Anime* anime) {
         switch (anime::airingStatus(*anime)) {
-          case anime::Status::Airing: return 0;
-          case anime::Status::NotYetAired: return 1;
-          case anime::Status::FinishedAiring: return 2;
-          default: return 3;
+          case anime::Status::Airing:
+            return 0;
+          case anime::Status::NotYetAired:
+            return 1;
+          case anime::Status::FinishedAiring:
+            return 2;
+          default:
+            return 3;
         }
       };
       return rank(lhs_anime) < rank(rhs_anime);

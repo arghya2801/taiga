@@ -32,13 +32,13 @@
 #include "gui/history/history_widget.hpp"
 #include "gui/library/library_widget.hpp"
 #include "gui/list/list_widget.hpp"
-#include "gui/manga/manga_widget.hpp"
 #include "gui/main/about_dialog.hpp"
 #include "gui/main/navigation_controller.hpp"
 #include "gui/main/navigation_widget.hpp"
 #include "gui/main/now_playing_widget.hpp"
 #include "gui/main/status_bar.hpp"
 #include "gui/main/status_bar_controller.hpp"
+#include "gui/manga/manga_widget.hpp"
 #include "gui/search/search_widget.hpp"
 #include "gui/settings/settings_dialog.hpp"
 #include "gui/stats/stats_widget.hpp"
@@ -57,15 +57,15 @@
 #include "sync/service.hpp"
 #include "taiga/accounts.hpp"
 #include "taiga/application.hpp"
-#include "taiga/session.hpp"
 #include "taiga/network.hpp"
 #include "taiga/options.hpp"
+#include "taiga/session.hpp"
 #include "taiga/settings.hpp"
 #include "taiga/sharing.hpp"
 #include "taiga/version.hpp"
+#include "track/feed.hpp"
 #include "track/media.hpp"
 #include "track/play.hpp"
-#include "track/feed.hpp"
 #include "track/scanner.hpp"
 #include "track/update_session.hpp"
 #include "ui_main_window.h"
@@ -143,10 +143,10 @@ void MainWindow::init() {
                                     static_cast<int>(taiga::opt::TorrentNewAction::Download);
             QStringList titles;
             for (const auto& item : items.mid(0, 5)) titles.append(item.title);
-            m_trayIcon->showMessage(
-                downloaded ? tr("Downloading %n new torrent(s)", nullptr, items.size())
-                           : tr("%n new torrent(s) available", nullptr, items.size()),
-                titles.join(u'\n'));
+            m_trayIcon->showMessage(downloaded
+                                        ? tr("Downloading %n new torrent(s)", nullptr, items.size())
+                                        : tr("%n new torrent(s) available", nullptr, items.size()),
+                                    titles.join(u'\n'));
           });
 
   if (taiga::opt::checkUpdatesOnStartup.get()) {
@@ -325,7 +325,10 @@ void MainWindow::initStatusbar() {
   for (auto* service : services) {
     connect(service, &sync::Service::authenticationCompleted, this,
             [this](const bool authenticated) {
-              if (!authenticated) return;
+              if (!authenticated) {
+                ui_->actionSynchronize->setEnabled(true);
+                return;
+              }
 
               const auto sender_service = qobject_cast<sync::Service*>(sender());
               const auto slug = sync::serviceSlug(sender_service->id()).toStdString();
@@ -339,7 +342,7 @@ void MainWindow::initStatusbar() {
             });
     connect(service, &sync::Service::listEntriesFetched, this, [this]() {
       m_statusBarController->clearMessage(StatusBarController::Source::Sync);
-      setEnabled(true);
+      ui_->actionSynchronize->setEnabled(true);
     });
     connect(service, &sync::Service::errorOccurred, this, [this](const QString& message) {
       const auto sender_service = qobject_cast<sync::Service*>(sender());
@@ -348,7 +351,7 @@ void MainWindow::initStatusbar() {
           .text = sync::tagMessage(sender_service->id(), message),
           .spin = false,
       });
-      setEnabled(true);
+      ui_->actionSynchronize->setEnabled(true);
     });
     connect(service, &sync::Service::transferProgress, this,
             [this](const qint64 current, const qint64 total) {
@@ -364,7 +367,7 @@ void MainWindow::initStatusbar() {
   connect(&sync::queue, &sync::Queue::changed, this, [this]() {
     if (sync::queue.count() == 0) {
       m_statusBarController->clearMessage(StatusBarController::Source::Sync);
-      setEnabled(true);
+      ui_->actionSynchronize->setEnabled(true);
     }
   });
 
@@ -734,11 +737,11 @@ void MainWindow::checkForUpdates(bool silent) {
     }
 
     m_statusBarController->clearMessage(StatusBarController::Source::Update);
-    const auto answer = QMessageBox::question(
-        this, tr("Update available"),
-        tr("Taiga %1 is available. You have %2.\n\nOpen the download page?")
-            .arg(QString::fromStdString(latest.to_string()))
-            .arg(QString::fromStdString(taiga::version().to_string())));
+    const auto answer =
+        QMessageBox::question(this, tr("Update available"),
+                              tr("Taiga %1 is available. You have %2.\n\nOpen the download page?")
+                                  .arg(QString::fromStdString(latest.to_string()))
+                                  .arg(QString::fromStdString(taiga::version().to_string())));
     if (answer == QMessageBox::Yes) {
       QDesktopServices::openUrl(QUrl{json["html_url"].toString()});
     }
@@ -764,7 +767,8 @@ void MainWindow::support() const {
 }
 
 void MainWindow::synchronize() {
-  setEnabled(false);
+  if (!ui_->actionSynchronize->isEnabled()) return;
+  ui_->actionSynchronize->setEnabled(false);
 
   const auto serviceName = sync::serviceName(sync::currentServiceId());
   const auto text = sync::willAuthenticate() ? tr("Authenticating with %1...").arg(serviceName)
@@ -777,7 +781,7 @@ void MainWindow::synchronize() {
 
   if (!sync::synchronize()) {
     m_statusBarController->clearMessage(StatusBarController::Source::Sync);
-    setEnabled(true);
+    ui_->actionSynchronize->setEnabled(true);
   }
 }
 

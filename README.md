@@ -19,6 +19,8 @@ AniList and Kitsu accounts still work for anime. Manga is MyAnimeList only.
 - Cards view with cached posters. Posters are stored small and compressed, so they load
   instantly after the first time.
 - Configurable double-click and middle-click actions, and new-episode highlighting.
+- Field-based search such as `genre:drama score:>=8 year:2024`, `studio:"Kyoto Animation"`,
+  or `note:"watch again"`. Terms intersect; personal scores use 0-10.
 
 **Manga list (MyAnimeList)**
 - Your full manga list, grouped by Reading, Completed, On hold, Dropped and Plan to read.
@@ -28,9 +30,14 @@ AniList and Kitsu accounts still work for anime. Manga is MyAnimeList only.
 - Edit status, chapters, volumes, score, rereading, priority, tags and comments, or remove the
   entry. **Read next chapter** does a quick +1.
 - Search MyAnimeList from the search box and add new titles.
+- Reading-date editing and XML/Markdown export. Changes save locally to a per-account queue
+  and retry after network errors, including after restarting the app.
 
 **Everything else**
-- **Statistics:** totals, time watched and planned, mean score and a score chart.
+- **Statistics:** a chart dashboard with Overview, Ratings, Taste, Timeline and Titles pages.
+  Explore MAL score comparisons, genre/studio rankings, completion history, backlog and repeats.
+  Click a bar to inspect its titles; filter, search and export the selection. Charts support
+  keyboard navigation and reflow in narrower windows. [Statistics guide](docs/statistics.md).
 - **Seasons:** one click to the previous, current or next season on the Search page.
 - **Torrents:** RSS feeds and search, with v1's filter system (discard, select, prefer) and
   optional auto-download.
@@ -68,8 +75,21 @@ after changing the source.
 
 To run an existing build without rebuilding, use `.\setup\run-local.ps1`.
 
-`taiga-checks.exe`, built alongside the app, runs self-checks for the format strings and torrent
-filters. It exits with a non-zero code on failure.
+The build script also builds and runs `taiga-checks.exe` for format strings, torrent filters,
+statistics, field queries and manga export. Failures stop the script.
+
+For SQLite, offline manga sync and statistics UI checks:
+
+```powershell
+.\setup\check-local.ps1
+# Include large-list measurements and a rendered statistics screenshot:
+.\setup\check-local.ps1 -Benchmark -Screenshot
+```
+
+The integration binary uses temporary data and a local HTTP server. It does not use your
+account or send edits to MyAnimeList. Add `--benchmark` to either checks executable for
+large-list measurements. The integration checks keep their widgets hidden and render with
+the normal Windows font engine. Measurements are recorded in [docs/performance.md](docs/performance.md).
 
 ## Credits
 

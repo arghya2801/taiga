@@ -162,7 +162,7 @@ void Service::fetchListEntries(const int offset, QSet<int> fetchedIds) {
         fetchedIds.insert(animeId);
       }
     }
-    anime::db.updateEntries(entries);
+    sync::applyFetchedEntries(entries);
 
     if (const auto nextOffset = pagingOffset(root["links"].toObject(), u"next"_s)) {
       fetchListEntries(*nextOffset, fetchedIds);

@@ -193,7 +193,7 @@ void Service::fetchListEntries(const int offset, QSet<int> fetchedIds) {
       }
     }
     anime::db.updateItems(items);
-    anime::db.updateEntries(entries);
+    sync::applyFetchedEntries(entries);
 
     if (const auto nextOffset = pagingOffset(root["paging"].toObject(), u"next"_s)) {
       fetchListEntries(*nextOffset, fetchedIds);

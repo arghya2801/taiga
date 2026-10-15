@@ -44,6 +44,13 @@ target_sources(taiga PRIVATE
 	media/anime_list.hpp
 	media/anime_season.cpp
 	media/anime_season.hpp
+	media/anime_query.cpp
+	media/anime_query.hpp
+	media/account_stats.cpp
+	media/account_stats.hpp
+	media/manga_io.cpp
+	media/manga_library.cpp
+	media/manga_library.hpp
 	media/anime_stats.cpp
 	media/anime_stats.hpp
 	media/anime_settings.hpp
@@ -173,8 +180,17 @@ add_executable(taiga-checks
 	checks.cpp
 	base/atf.cpp
 	track/feed_filter.cpp
+	media/account_stats.cpp
+	media/manga_io.cpp
+	media/anime_query.cpp
+	base/chrono.cpp
 )
 target_link_libraries(taiga-checks PRIVATE Qt6::Core)
+if(BUILD_TESTING)
+  add_test(NAME taiga-logic COMMAND taiga-checks)
+  set_tests_properties(taiga-logic PROPERTIES
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+endif()
 
 add_subdirectory(gui)
 add_subdirectory(resources)
@@ -185,3 +201,23 @@ qt_add_translations(taiga
 	TS_FILE_DIR resources/translations
 	LUPDATE_OPTIONS -no-obsolete -locations none
 )
+
+# Integration checks use the real app code with a temporary data directory.
+if(BUILD_TESTING)
+  get_target_property(taiga_check_sources taiga SOURCES)
+  list(FILTER taiga_check_sources EXCLUDE REGEX "(^|/)main\\.cpp$")
+  add_executable(taiga-integration-checks ui_checks.cpp ${taiga_check_sources})
+  target_compile_definitions(taiga-integration-checks PRIVATE TAIGA_TESTING TAIGA_PORTABLE)
+  target_link_libraries(taiga-integration-checks PRIVATE Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql
+    Qt6::Widgets taiga-config taiga-deps taiga-gui taiga-resources)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    target_link_libraries(taiga-integration-checks PRIVATE Psapi)
+    set(taiga_test_platform windows)
+  else()
+    set(taiga_test_platform offscreen)
+  endif()
+  add_test(NAME taiga-ui COMMAND taiga-integration-checks)
+  set_tests_properties(taiga-ui PROPERTIES TIMEOUT 60
+    ENVIRONMENT "QT_QPA_PLATFORM=${taiga_test_platform};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+endif()

@@ -34,10 +34,11 @@
 #include "gui/utils/theme.hpp"
 #include "media/anime_db.hpp"
 #include "media/anime_history.hpp"
+#include "media/manga_library.hpp"
 #include "sync/queue.hpp"
 #include "taiga/config.h"
-#include "taiga/path.hpp"
 #include "taiga/options.hpp"
+#include "taiga/path.hpp"
 #include "taiga/settings.hpp"
 #include "taiga/version.hpp"
 #include "track/media.hpp"
@@ -45,7 +46,7 @@
 
 namespace taiga {
 
-Application::Application(int argc, char* argv[])
+Application::Application(int& argc, char* argv[])
     : QApplication(argc, argv), shared_memory_(TAIGA_APP_NAME) {
   setApplicationName("taiga");
   setApplicationDisplayName("Taiga");
@@ -59,6 +60,13 @@ Application::~Application() {
     window_->hide();
   }
 }
+
+#ifdef TAIGA_TESTING
+void Application::initWindowForChecks() {
+  window_ = new gui::MainWindow();
+  window_->init();
+}
+#endif
 
 int Application::run() {
   parseCommandLine();
@@ -86,6 +94,7 @@ int Application::run() {
   anime::db.init();
   anime::history.init();
   sync::queue.init();
+  manga::library.init();
   track::media::detection()->init();
   track::updateSession()->init();
   gui::imageProvider.init();

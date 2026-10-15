@@ -35,11 +35,9 @@ History::History() : QObject{} {}
 
 void History::init() {
   auto db = QSqlDatabase::database();
-  if (!db.open()) return;
+  if (!db.isOpen() && !db.open()) return;
 
   const bool tableExists = db.tables().contains("history");
-
-  db.close();
 
   if (!tableExists) {
     createTable();
@@ -52,7 +50,7 @@ void History::init() {
 
 void History::add(const int animeId, const int episode, const std::time_t time) {
   auto db = QSqlDatabase::database();
-  if (!db.open()) return;
+  if (!db.isOpen() && !db.open()) return;
 
   QSqlQuery q{db};
   int id = 0;
@@ -63,8 +61,6 @@ void History::add(const int animeId, const int episode, const std::time_t time) 
     q.exec();
     id = q.lastInsertId().toInt();
   }
-
-  db.close();
 
   items_.append(HistoryItem{
       .id = id,
@@ -78,12 +74,11 @@ void History::add(const int animeId, const int episode, const std::time_t time) 
 
 void History::remove(const int id) {
   auto db = QSqlDatabase::database();
-  if (db.open()) {
+  if (db.isOpen() || db.open()) {
     QSqlQuery q{db};
     q.prepare("DELETE FROM history WHERE id = :id");
     q.bindValue(":id", id);
     q.exec();
-    db.close();
   }
 
   const auto it = std::ranges::find(items_, id, &HistoryItem::id);
@@ -94,10 +89,9 @@ void History::remove(const int id) {
 
 void History::clear() {
   auto db = QSqlDatabase::database();
-  if (db.open()) {
+  if (db.isOpen() || db.open()) {
     QSqlQuery q{db};
     q.exec("DELETE FROM history");
-    db.close();
   }
 
   items_.clear();
@@ -115,19 +109,17 @@ QString History::sql(const QString& name) const {
 
 void History::createTable() {
   auto db = QSqlDatabase::database();
-  if (!db.open()) return;
+  if (!db.isOpen() && !db.open()) return;
 
   if (!db.tables().contains("history")) {
     QSqlQuery q{db};
     q.exec(sql("createHistory"));
   }
-
-  db.close();
 }
 
 void History::readItems() {
   auto db = QSqlDatabase::database();
-  if (!db.open()) return;
+  if (!db.isOpen() && !db.open()) return;
 
   QSqlQuery q{db};
   if (q.exec("SELECT * FROM history ORDER BY id ASC")) {
@@ -135,8 +127,6 @@ void History::readItems() {
       items_.append(itemFromQuery(q));
     }
   }
-
-  db.close();
 }
 
 void History::bindItemToQuery(const HistoryItem& item, QSqlQuery& q) const {
@@ -156,7 +146,7 @@ HistoryItem History::itemFromQuery(const QSqlQuery& q) const {
 
 void History::migrateFromV1() {
   auto db = QSqlDatabase::database();
-  if (!db.open()) return;
+  if (!db.isOpen() && !db.open()) return;
 
   QSqlQuery q{db};
   if (!q.prepare(sql("insertHistory"))) return;
@@ -177,7 +167,6 @@ void History::migrateFromV1() {
   }
 
   db.commit();
-  db.close();
 }
 
 }  // namespace anime

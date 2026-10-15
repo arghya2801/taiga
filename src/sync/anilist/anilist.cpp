@@ -188,7 +188,7 @@ void Service::fetchListEntries() {
       }
     }
     anime::db.updateItems(items);
-    anime::db.updateEntries(entries);
+    sync::applyFetchedEntries(entries);
 
     sync::pruneMissingEntries(fetchedIds);
     emit listEntriesFetched();

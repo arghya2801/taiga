@@ -1,5 +1,3 @@
-#include "myanimelist.hpp"
-
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -9,6 +7,7 @@
 #include <utility>
 
 #include "base/string.hpp"
+#include "myanimelist.hpp"
 #include "sync/myanimelist/myanimelist_error.hpp"
 #include "sync/myanimelist/myanimelist_utils.hpp"
 #include "taiga/accounts.hpp"
@@ -53,7 +52,8 @@ manga::Entry parseManga(const QJsonObject& node, const QJsonObject& status = {})
     const auto author = value.toObject();
     const auto person = author["node"].toObject();
     const auto name = QStringList{person["first_name"].toString(), person["last_name"].toString()}
-                          .join(' ').trimmed();
+                          .join(' ')
+                          .trimmed();
     if (!name.isEmpty()) entry.authors.append(name);
   }
   const auto listStatus = status.isEmpty() ? node["my_list_status"].toObject() : status;
@@ -69,6 +69,8 @@ manga::Entry parseManga(const QJsonObject& node, const QJsonObject& status = {})
   entry.comments = listStatus["comments"].toString();
   entry.startedReading = listStatus["start_date"].toString();
   entry.finishedReading = listStatus["finish_date"].toString();
+  if (entry.startedReading.startsWith("0000")) entry.startedReading.clear();
+  if (entry.finishedReading.startsWith("0000")) entry.finishedReading.clear();
   entry.updatedAt = listStatus["updated_at"].toString();
   for (const auto& value : listStatus["tags"].toArray()) {
     const auto tag = value.toString();
@@ -78,7 +80,7 @@ manga::Entry parseManga(const QJsonObject& node, const QJsonObject& status = {})
 }
 
 QString mangaFields() {
-  return u"id,title,main_picture,media_type,status,num_chapters,num_volumes,mean"_s;
+  return u"id,title,main_picture,media_type,status,num_chapters,num_volumes,mean,genres,authors{first_name,last_name},start_date,end_date"_s;
 }
 
 QString mangaListFields() {
@@ -98,16 +100,23 @@ void Service::fetchMangaList(int offset, QList<manga::Entry> entries) {
                         {"offset", QString::number(offset)},
                         {"nsfw", "true"},
                         {"fields", u"%1,list_status{%2}"_s.arg(mangaFields(), mangaListFields())}};
-  const auto callback = [this, offset, entries = std::move(entries)](QRestReply& reply) mutable {
+  const auto callback = [this, username, offset,
+                         entries = std::move(entries)](QRestReply& reply) mutable {
+    if (username != QString::fromStdString(taiga::accounts.myanimelistUsername())) return;
     if (isError(reply)) {
-      if (retryOnTokenExpiry(reply, [this, offset, entries] { fetchMangaList(offset, entries); }))
+      if (retryOnTokenExpiry(reply, [this, username, offset, entries] {
+            if (username == QString::fromStdString(taiga::accounts.myanimelistUsername()))
+              fetchMangaList(offset, entries);
+          }))
         return;
       handleError(*this, reply, "Could not load manga list.");
+      emit mangaListFailed();
       return;
     }
     const auto json = reply.readJson();
     if (!json) {
       handleError(*this, reply, "Could not parse manga list.");
+      emit mangaListFailed();
       return;
     }
     const auto root = json->object();
@@ -124,19 +133,24 @@ void Service::fetchMangaList(int offset, QList<manga::Entry> entries) {
     }
   };
 
-  manager_.get(api_.createRequest(u"/users/%1/mangalist"_s.arg(username), query), this,
-               callback);
+  manager_.get(api_.createRequest(u"/users/%1/mangalist"_s.arg(username), query), this, callback);
 }
 
 void Service::searchManga(const QString& queryText) {
+  const auto account = taiga::accounts.myanimelistUsername();
   if (queryText.trimmed().isEmpty()) return;
-  const QUrlQuery query{{"q", queryText.trimmed()},
-                        {"limit", "100"},
-                        {"nsfw", "true"},
-                        {"fields", u"%1,my_list_status{%2}"_s.arg(mangaFields(), mangaListFields())}};
-  const auto callback = [this, queryText](QRestReply& reply) {
+  const QUrlQuery query{
+      {"q", queryText.trimmed()},
+      {"limit", "100"},
+      {"nsfw", "true"},
+      {"fields", u"%1,my_list_status{%2}"_s.arg(mangaFields(), mangaListFields())}};
+  const auto callback = [this, queryText, account](QRestReply& reply) {
+    if (account != taiga::accounts.myanimelistUsername()) return;
     if (isError(reply)) {
-      if (retryOnTokenExpiry(reply, [this, queryText] { searchManga(queryText); })) return;
+      if (retryOnTokenExpiry(reply, [this, queryText, account] {
+            if (account == taiga::accounts.myanimelistUsername()) searchManga(queryText);
+          }))
+        return;
       handleError(*this, reply, "Could not search manga.");
       return;
     }
@@ -157,12 +171,18 @@ void Service::searchManga(const QString& queryText) {
 }
 
 void Service::fetchMangaDetails(int id) {
-  const auto fields = u"%1,alternative_titles,start_date,end_date,synopsis,rank,popularity,genres,authors{first_name,last_name},status,my_list_status{%2}"_s
-                          .arg(mangaFields(), mangaListFields());
+  const auto account = taiga::accounts.myanimelistUsername();
+  const auto fields =
+      u"%1,alternative_titles,start_date,end_date,synopsis,rank,popularity,genres,authors{first_name,last_name},status,my_list_status{%2}"_s
+          .arg(mangaFields(), mangaListFields());
   const QUrlQuery query{{"fields", fields}};
-  const auto callback = [this, id](QRestReply& reply) {
+  const auto callback = [this, id, account](QRestReply& reply) {
+    if (account != taiga::accounts.myanimelistUsername()) return;
     if (isError(reply)) {
-      if (retryOnTokenExpiry(reply, [this, id] { fetchMangaDetails(id); })) return;
+      if (retryOnTokenExpiry(reply, [this, id, account] {
+            if (account == taiga::accounts.myanimelistUsername()) fetchMangaDetails(id);
+          }))
+        return;
       handleError(*this, reply, "Could not load manga details.");
       emit mangaDetailsFailed(id);
       return;
@@ -179,6 +199,7 @@ void Service::fetchMangaDetails(int id) {
 }
 
 void Service::updateMangaEntry(const manga::Entry& entry, const manga::Entry& previous) {
+  const auto account = taiga::accounts.myanimelistUsername();
   const bool adding = !previous.onList;
   QUrlQuery body;
   if (adding || entry.status != previous.status) body.addQueryItem("status", entry.status);
@@ -198,20 +219,32 @@ void Service::updateMangaEntry(const manga::Entry& entry, const manga::Entry& pr
     body.addQueryItem("priority", QString::number(entry.priority));
   if (adding || entry.tags != previous.tags) body.addQueryItem("tags", entry.tags.join(','));
   if (adding || entry.comments != previous.comments) body.addQueryItem("comments", entry.comments);
+  if ((adding && !entry.startedReading.isEmpty()) ||
+      entry.startedReading != previous.startedReading)
+    body.addQueryItem("start_date",
+                      entry.startedReading.isEmpty() ? "0000-00-00" : entry.startedReading);
+  if ((adding && !entry.finishedReading.isEmpty()) ||
+      entry.finishedReading != previous.finishedReading)
+    body.addQueryItem("finish_date",
+                      entry.finishedReading.isEmpty() ? "0000-00-00" : entry.finishedReading);
   auto request = api_.createRequest(u"/manga/%1/my_list_status"_s.arg(entry.id));
   request.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded");
 
-  const auto callback = [this, entry, previous](QRestReply& reply) {
+  const auto callback = [this, entry, previous, account](QRestReply& reply) {
+    if (account != taiga::accounts.myanimelistUsername()) return;
     if (isError(reply)) {
-      if (retryOnTokenExpiry(reply, [this, entry, previous] {
-            updateMangaEntry(entry, previous);
-          })) return;
+      if (retryOnTokenExpiry(reply, [this, entry, previous, account] {
+            if (account == taiga::accounts.myanimelistUsername()) updateMangaEntry(entry, previous);
+          }))
+        return;
       handleError(*this, reply, "Could not save manga entry.");
+      emit mangaMutationFailed(entry.id);
       return;
     }
     const auto json = reply.readJson();
     if (!json) {
       handleError(*this, reply, "Could not confirm manga update.");
+      emit mangaMutationFailed(entry.id);
       return;
     }
     const auto status = json->object();
@@ -225,6 +258,11 @@ void Service::updateMangaEntry(const manga::Entry& entry, const manga::Entry& pr
     updated.rereadValue = status["reread_value"].toInt(entry.rereadValue);
     updated.priority = status["priority"].toInt(entry.priority);
     updated.comments = status["comments"].toString(entry.comments);
+    updated.startedReading = status["start_date"].toString(entry.startedReading);
+    updated.finishedReading = status["finish_date"].toString(entry.finishedReading);
+    if (updated.startedReading.startsWith("0000")) updated.startedReading.clear();
+    if (updated.finishedReading.startsWith("0000")) updated.finishedReading.clear();
+    updated.updatedAt = status["updated_at"].toString(entry.updatedAt);
     if (status.contains("tags")) {
       updated.tags.clear();
       for (const auto& value : status["tags"].toArray()) updated.tags.append(value.toString());
@@ -237,10 +275,16 @@ void Service::updateMangaEntry(const manga::Entry& entry, const manga::Entry& pr
 }
 
 void Service::deleteMangaEntry(int id) {
-  const auto callback = [this, id](QRestReply& reply) {
+  const auto account = taiga::accounts.myanimelistUsername();
+  const auto callback = [this, id, account](QRestReply& reply) {
+    if (account != taiga::accounts.myanimelistUsername()) return;
     if (isError(reply) && reply.httpStatus() != 404) {
-      if (retryOnTokenExpiry(reply, [this, id] { deleteMangaEntry(id); })) return;
+      if (retryOnTokenExpiry(reply, [this, id, account] {
+            if (account == taiga::accounts.myanimelistUsername()) deleteMangaEntry(id);
+          }))
+        return;
       handleError(*this, reply, "Could not delete manga entry.");
+      emit mangaMutationFailed(id);
       return;
     }
     emit mangaEntryDeleted(id);

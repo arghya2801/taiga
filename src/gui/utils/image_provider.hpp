@@ -42,11 +42,13 @@ public:
   QPixmap loadCover(const int mangaId, const QString& url);
 
   qint64 cacheSize() const;
+  void refreshCacheSize();
   void clearCache();
 
 signals:
   void posterChanged(const int id);
   void coverChanged(const int mangaId);
+  void cacheSizeChanged(qint64 bytes);
 
 private:
   enum class Kind { Anime, Manga };
@@ -64,6 +66,9 @@ private:
   QRestAccessManager* m_manager = nullptr;
   QSet<QString> m_loading;
   QMap<QString, QDateTime> m_retryAfter;
+  qint64 m_cacheSize = -1;
+  bool m_scanningCache = false;
+  quint64 m_cacheGeneration = 0;
 };
 
 inline ImageProvider imageProvider;

@@ -74,6 +74,21 @@ NetworkAccessManager::NetworkAccessManager(QObject* parent) : QNetworkAccessMana
   });
 }
 
+#ifdef TAIGA_TESTING
+QNetworkReply* NetworkAccessManager::createRequest(Operation operation,
+                                                   const QNetworkRequest& request,
+                                                   QIODevice* outgoingData) {
+  // The integration binary cannot contact live services or use a real account.
+  QNetworkRequest local(request);
+  QUrl url(QCoreApplication::instance()->property("taiga.testApiBase").toString());
+  if (!url.isValid() || url.host() != "127.0.0.1") url = QUrl("http://127.0.0.1:9");
+  url.setPath(request.url().path());
+  url.setQuery(request.url().query());
+  local.setUrl(url);
+  return QNetworkAccessManager::createRequest(operation, local, outgoingData);
+}
+#endif
+
 QHttpHeaders NetworkAccessManager::commonHeaders() {
   QHttpHeaders headers;
 

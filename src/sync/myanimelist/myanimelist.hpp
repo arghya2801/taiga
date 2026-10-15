@@ -58,11 +58,13 @@ public:
 
 signals:
   void mangaListFetched(const QList<manga::Entry>& entries);
+  void mangaListFailed();
   void mangaSearchCompleted(const QString& query, const QList<manga::Entry>& entries);
   void mangaDetailsFetched(const manga::Entry& entry);
   void mangaDetailsFailed(int id);
   void mangaEntryUpdated(const manga::Entry& entry);
   void mangaEntryDeleted(int id);
+  void mangaMutationFailed(int id);
 
 private:
   void refreshAccessToken(std::function<void()> onSuccess);
